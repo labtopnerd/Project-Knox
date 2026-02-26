@@ -147,6 +147,16 @@ export default function BillDetailScreen() {
         </View>
       )}
 
+      {/* Full text */}
+      {bill.fullTextUrl && (
+        <Pressable
+          style={styles.fullTextBtn}
+          onPress={() => void Linking.openURL(bill.fullTextUrl!)}
+        >
+          <Text style={styles.fullTextBtnText}>📄 Read full bill text</Text>
+        </Pressable>
+      )}
+
       {/* Community poll */}
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>Community opinion</Text>
@@ -228,5 +238,7 @@ const styles = StyleSheet.create({
   voteBtnText: { fontSize: 13, fontWeight: '600', color: '#374151' },
   contactBtn: { backgroundColor: '#1e3a8a', borderRadius: 12, padding: 16, alignItems: 'center' },
   contactBtnText: { color: '#fff', fontWeight: '600', fontSize: 15 },
+  fullTextBtn: { backgroundColor: '#1f2937', borderRadius: 12, padding: 14, alignItems: 'center' },
+  fullTextBtnText: { color: '#fff', fontWeight: '600', fontSize: 14 },
   errorText: { color: '#dc2626' },
 })

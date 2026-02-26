@@ -7,7 +7,7 @@ import { VoteResultsBar } from '@/components/bills/VoteResultsBar'
 import { BillStatusBadge } from '@/components/bills/BillStatusBadge'
 import { RepCard } from '@/components/representatives/RepCard'
 import { ContactForm } from '@/components/contact/ContactForm'
-import { ExternalLink, Calendar, ChevronLeft } from 'lucide-react'
+import { ExternalLink, Calendar, ChevronLeft, FileText } from 'lucide-react'
 import type { Representative } from '@project-knox/types'
 
 export const dynamic = 'force-dynamic'
@@ -158,6 +158,28 @@ export default async function BillDetailPage({ params }: { params: Params }) {
           <div className="prose prose-sm max-w-none text-gray-700">
             <p>{bill.summary}</p>
           </div>
+        </section>
+      )}
+
+      {/* Full text link */}
+      {bill.fullTextUrl && (
+        <section className="mb-6 rounded-xl border border-gray-100 bg-white p-6 shadow-sm">
+          <h2 className="mb-3 flex items-center gap-2 text-base font-semibold text-gray-900">
+            <FileText className="h-4 w-4 text-gray-500" />
+            Full bill text
+          </h2>
+          <p className="mb-4 text-sm text-gray-500">
+            Read the complete legislative text of this bill on the official government source.
+          </p>
+          <a
+            href={bill.fullTextUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 rounded-lg bg-gray-800 px-4 py-2.5 text-sm font-semibold text-white hover:bg-gray-700"
+          >
+            <ExternalLink className="h-4 w-4" />
+            Read full text
+          </a>
         </section>
       )}
 

@@ -1,9 +1,9 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { useSearchParams } from 'next/navigation'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { BillCard } from './BillCard'
-import { Loader2 } from 'lucide-react'
+import { Loader2, ChevronLeft, ChevronRight } from 'lucide-react'
 import type { BillListResponse } from '@project-knox/types'
 
 interface BillFeedProps {
@@ -40,12 +40,14 @@ async function fetchBills(params: FetchParams): Promise<BillListResponse> {
 export function BillFeed({ forUser }: BillFeedProps) {
   // Read filter values directly from URL so BillFilters and BillFeed stay in sync
   const searchParams = useSearchParams()
+  const router = useRouter()
   const level = searchParams.get('level') ?? undefined
   const chamber = searchParams.get('chamber') ?? undefined
   const status = searchParams.get('status') ?? undefined
   const search = searchParams.get('search') ?? undefined
   const tags = searchParams.get('tags') ?? undefined
-  const page = searchParams.get('page') ?? undefined
+  const page = searchParams.get('page') ?? '1'
+  const currentPage = Math.max(1, parseInt(page, 10) || 1)
 
   const fetchKey = { forUser, level, chamber, status, search, tags, page }
 
@@ -53,6 +55,19 @@ export function BillFeed({ forUser }: BillFeedProps) {
     queryKey: ['bills', fetchKey],
     queryFn: () => fetchBills(fetchKey),
   })
+
+  const goToPage = (newPage: number) => {
+    const current = new URLSearchParams(searchParams.toString())
+    if (newPage <= 1) {
+      current.delete('page')
+    } else {
+      current.set('page', String(newPage))
+    }
+    router.push(`?${current.toString()}`, { scroll: false })
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const totalPages = data ? Math.ceil(data.total / 20) : 1
 
   if (isLoading) {
     return (
@@ -84,10 +99,32 @@ export function BillFeed({ forUser }: BillFeedProps) {
       {data.bills.map((bill) => (
         <BillCard key={bill.id} bill={bill} showVoting />
       ))}
-      {data.hasMore && (
-        <p className="py-4 text-center text-sm text-gray-400">
-          Showing {data.bills.length} of {data.total} bills
-        </p>
+
+      {/* Pagination controls */}
+      {data.total > 20 && (
+        <div className="flex items-center justify-between border-t border-gray-100 pt-4">
+          <p className="text-sm text-gray-400">
+            Page {currentPage} of {totalPages} &middot; {data.total.toLocaleString()} bills
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => goToPage(currentPage - 1)}
+              disabled={currentPage <= 1}
+              className="flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Previous
+            </button>
+            <button
+              onClick={() => goToPage(currentPage + 1)}
+              disabled={!data.hasMore}
+              className="flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Next
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
       )}
     </div>
   )

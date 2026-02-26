@@ -70,6 +70,36 @@ async function getTrendingBills() {
     .filter(Boolean) as typeof aggregates
 }
 
+async function getStateBreakdown(userId: string) {
+  // Get the user's state from their profile
+  const profile = await prisma.userProfile.findUnique({
+    where: { id: userId },
+    select: { stateCode: true },
+  })
+  if (!profile?.stateCode) return null
+
+  // Get top bills in the user's state
+  const stateAggs = await prisma.billVoteAggregateByState.findMany({
+    where: { stateCode: profile.stateCode, totalCount: { gt: 0 } },
+    orderBy: { totalCount: 'desc' },
+    take: 8,
+    include: {
+      bill: {
+        select: {
+          id: true,
+          billNumber: true,
+          title: true,
+          status: true,
+          chamber: true,
+          level: true,
+        },
+      },
+    },
+  })
+
+  return { stateCode: profile.stateCode, stateAggs }
+}
+
 async function getTopContested() {
   // Bills closest to 50/50 split with at least 10 votes
   const aggregates = await prisma.billVoteAggregate.findMany({
@@ -104,7 +134,11 @@ export default async function CommunityPage() {
   const session = await auth()
   if (!session?.user?.id) redirect('/login')
 
-  const [trending, contested] = await Promise.all([getTrendingBills(), getTopContested()])
+  const [trending, contested, stateData] = await Promise.all([
+    getTrendingBills(),
+    getTopContested(),
+    getStateBreakdown(session.user.id),
+  ])
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -230,6 +264,71 @@ export default async function CommunityPage() {
             })}
           </div>
         </section>
+      )}
+
+      {/* Your state's opinion */}
+      {stateData && stateData.stateAggs.length > 0 && (
+        <section className="mb-8">
+          <h2 className="mb-4 flex items-center gap-2 text-base font-semibold text-gray-900">
+            <span>📍</span> {stateData.stateCode} opinion
+          </h2>
+          <p className="mb-4 text-sm text-gray-500">
+            How {stateData.stateCode} residents on Project Knox have voted on these bills.
+          </p>
+          <div className="space-y-4">
+            {stateData.stateAggs.map((agg) => {
+              if (!agg.bill) return null
+              return (
+                <article
+                  key={`${agg.billId}-${agg.stateCode}`}
+                  className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm"
+                >
+                  <div className="mb-3 flex items-start justify-between gap-3">
+                    <div className="flex-1">
+                      {agg.bill.billNumber && (
+                        <span className="mb-0.5 block text-xs font-semibold uppercase tracking-wide text-gray-400">
+                          {agg.bill.billNumber}
+                        </span>
+                      )}
+                      <Link
+                        href={`/bills/${agg.bill.id}`}
+                        className="text-sm font-semibold text-gray-900 hover:text-primary-600 line-clamp-2"
+                      >
+                        {agg.bill.title}
+                      </Link>
+                    </div>
+                    <BillStatusBadge status={agg.bill.status} />
+                  </div>
+                  <VoteResultsBar
+                    supportCount={agg.supportCount}
+                    opposeCount={agg.opposeCount}
+                    neutralCount={agg.neutralCount}
+                    totalCount={agg.totalCount}
+                    showCounts
+                  />
+                  <div className="mt-2 text-right">
+                    <Link
+                      href={`/bills/${agg.bill.id}`}
+                      className="text-xs font-medium text-primary-600 hover:underline"
+                    >
+                      Vote or view →
+                    </Link>
+                  </div>
+                </article>
+              )
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* No state set prompt */}
+      {!stateData && (
+        <div className="mb-8 rounded-xl border border-blue-100 bg-blue-50 p-5">
+          <p className="text-sm font-medium text-blue-800">See your state&apos;s opinion</p>
+          <p className="mt-1 text-sm text-blue-600">
+            <Link href="/settings" className="underline">Set your location</Link> to see how people in your state vote on bills.
+          </p>
+        </div>
       )}
 
       {/* CTA if no data */}

@@ -9,20 +9,39 @@ import {
   TextInput,
   Pressable,
   ActivityIndicator,
+  Alert,
   StyleSheet,
   ScrollView,
-  Alert,
 } from 'react-native'
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { useRouter } from 'expo-router'
+import { useAuthStore } from '../../store/auth'
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3001'
 
 export default function ProfileScreen() {
   const queryClient = useQueryClient()
+  const router = useRouter()
+  const { token, signOut } = useAuthStore()
   const [lookupInput, setLookupInput] = useState('')
   const [lookupLoading, setLookupLoading] = useState(false)
   const [lookupResult, setLookupResult] = useState<string | null>(null)
+
+  const handleSignOut = async () => {
+    Alert.alert('Sign out', 'Are you sure you want to sign out?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Sign out',
+        style: 'destructive',
+        onPress: async () => {
+          await signOut()
+          queryClient.clear()
+          router.replace('/login')
+        },
+      },
+    ])
+  }
 
   const handleLookup = async () => {
     if (!lookupInput.trim()) return
@@ -118,12 +137,28 @@ export default function ProfileScreen() {
         </Text>
       </View>
 
-      {/* Sign in notice */}
+      {/* Account section */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>🔐 Account</Text>
-        <Text style={styles.sectionDesc}>
-          Sign in on the web app at projectknox.app to save your preferences and notification settings across devices.
-        </Text>
+        {token ? (
+          <>
+            <Text style={styles.sectionDesc}>
+              You are signed in. Your votes and preferences are synced to your account.
+            </Text>
+            <Pressable style={[styles.btn, styles.signOutBtn]} onPress={handleSignOut}>
+              <Text style={styles.signOutBtnText}>Sign out</Text>
+            </Pressable>
+          </>
+        ) : (
+          <>
+            <Text style={styles.sectionDesc}>
+              Sign in to save your votes and sync preferences across devices.
+            </Text>
+            <Pressable style={[styles.btn, { marginTop: 12 }]} onPress={() => router.push('/login')}>
+              <Text style={styles.btnText}>Sign in</Text>
+            </Pressable>
+          </>
+        )}
       </View>
     </ScrollView>
   )
@@ -167,6 +202,8 @@ const styles = StyleSheet.create({
   },
   btnDisabled: { opacity: 0.5 },
   btnText: { color: '#fff', fontWeight: '600', fontSize: 14 },
+  signOutBtn: { backgroundColor: '#dc2626', marginTop: 12 },
+  signOutBtnText: { color: '#fff', fontWeight: '600', fontSize: 14 },
   resultBox: {
     marginTop: 12,
     backgroundColor: '#f0fdf4',

@@ -17,12 +17,14 @@ import {
 } from 'react-native'
 import { useState } from 'react'
 import { useRouter } from 'expo-router'
+import { useAuthStore } from '../store/auth'
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3001'
 const WEB_URL = process.env.EXPO_PUBLIC_WEB_URL ?? 'http://localhost:3000'
 
 export default function LoginScreen() {
   const router = useRouter()
+  const setToken = useAuthStore((s) => s.setToken)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -47,9 +49,8 @@ export default function LoginScreen() {
         return
       }
 
-      // TODO Phase 3: Store token in SecureStore and refresh queries
-      // import * as SecureStore from 'expo-secure-store'
-      // await SecureStore.setItemAsync('knox_token', data.token)
+      // Persist token in SecureStore for future sessions
+      await setToken(data.token)
 
       router.replace('/(tabs)')
     } catch {

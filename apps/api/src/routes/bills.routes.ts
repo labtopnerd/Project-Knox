@@ -235,10 +235,11 @@ billsRouter.post('/:id/vote', requireAuth, async (req: AuthRequest, res: Respons
     return
   }
 
-  // Get current vote to determine if this is a new vote or an update
-  const existing = await prisma.userVote.findUnique({
-    where: { userId_billId: { userId, billId } },
-  })
+  // Get current vote and user's state to determine deltas
+  const [existing, userProfile] = await Promise.all([
+    prisma.userVote.findUnique({ where: { userId_billId: { userId, billId } } }),
+    prisma.userProfile.findUnique({ where: { id: userId }, select: { stateCode: true } }),
+  ])
 
   // Upsert the vote
   const vote = await prisma.userVote.upsert({
@@ -247,8 +248,12 @@ billsRouter.post('/:id/vote', requireAuth, async (req: AuthRequest, res: Respons
     update: { vote: position },
   })
 
-  // Update aggregate counts atomically
-  await updateBillAggregates(billId, existing?.vote ?? null, position)
+  // Update aggregate counts atomically (national + per-state)
+  const oldVote = existing?.vote ?? null
+  await updateBillAggregates(billId, oldVote, position)
+  if (userProfile?.stateCode) {
+    await updateBillAggregateByState(billId, userProfile.stateCode, oldVote, position)
+  }
 
   // Get updated aggregates
   const aggregates = await prisma.billVoteAggregate.findUnique({ where: { billId } })
@@ -265,9 +270,10 @@ billsRouter.delete('/:id/vote', requireAuth, async (req: AuthRequest, res: Respo
   const billId = req.params.id
   const userId = req.userId!
 
-  const existing = await prisma.userVote.findUnique({
-    where: { userId_billId: { userId, billId } },
-  })
+  const [existing, userProfile] = await Promise.all([
+    prisma.userVote.findUnique({ where: { userId_billId: { userId, billId } } }),
+    prisma.userProfile.findUnique({ where: { id: userId }, select: { stateCode: true } }),
+  ])
 
   if (!existing) {
     res.status(404).json({ error: 'Not Found', message: 'Vote not found' })
@@ -276,6 +282,9 @@ billsRouter.delete('/:id/vote', requireAuth, async (req: AuthRequest, res: Respo
 
   await prisma.userVote.delete({ where: { userId_billId: { userId, billId } } })
   await updateBillAggregates(billId, existing.vote, null)
+  if (userProfile?.stateCode) {
+    await updateBillAggregateByState(billId, userProfile.stateCode, existing.vote, null)
+  }
   await cacheDelete(`bills:aggregates:${billId}`)
 
   res.json({ success: true })
@@ -323,6 +332,49 @@ async function updateBillAggregates(
       neutralCount: { increment: delta.neutralCount },
       totalCount: { increment: delta.totalCount },
       lastUpdatedAt: new Date(),
+    },
+  })
+}
+
+async function updateBillAggregateByState(
+  billId: string,
+  stateCode: string,
+  oldVote: string | null,
+  newVote: string | null,
+): Promise<void> {
+  const delta: Record<string, number> = {
+    supportCount: 0,
+    opposeCount: 0,
+    neutralCount: 0,
+    totalCount: 0,
+  }
+
+  if (oldVote === 'support') delta.supportCount--
+  else if (oldVote === 'oppose') delta.opposeCount--
+  else if (oldVote === 'neutral') delta.neutralCount--
+  if (oldVote) delta.totalCount--
+
+  if (newVote === 'support') delta.supportCount++
+  else if (newVote === 'oppose') delta.opposeCount++
+  else if (newVote === 'neutral') delta.neutralCount++
+  if (newVote) delta.totalCount++
+
+  await prisma.billVoteAggregateByState.upsert({
+    where: { billId_stateCode: { billId, stateCode } },
+    create: {
+      billId,
+      stateCode,
+      supportCount: Math.max(0, delta.supportCount),
+      opposeCount: Math.max(0, delta.opposeCount),
+      neutralCount: Math.max(0, delta.neutralCount),
+      totalCount: Math.max(0, delta.totalCount),
+    },
+    update: {
+      supportCount: { increment: delta.supportCount },
+      opposeCount: { increment: delta.opposeCount },
+      neutralCount: { increment: delta.neutralCount },
+      totalCount: { increment: delta.totalCount },
+      updatedAt: new Date(),
     },
   })
 }
