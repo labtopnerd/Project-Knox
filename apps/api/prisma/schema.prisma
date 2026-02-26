@@ -1,0 +1,285 @@
+// Project Knox — Prisma Schema
+// Database: PostgreSQL
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================================================
+// AUTH — NextAuth.js / Auth.js compatible tables
+// =============================================================================
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// =============================================================================
+// USERS
+// =============================================================================
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  passwordHash  String?   // For email/password auth
+  accounts      Account[]
+  sessions      Session[]
+  profile       UserProfile?
+  votes         UserVote[]
+  sentMessages  SentMessage[]
+  notifications NotificationEvent[]
+  representatives UserRepresentative[]
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model UserProfile {
+  id           String   @id // Same as User.id (1:1)
+  user         User     @relation(fields: [id], references: [id], onDelete: Cascade)
+  zipCode      String?
+  addressLine1 String?
+  city         String?
+  stateCode    String?  @db.Char(2)
+  latitude     Decimal? @db.Decimal(9, 6)
+  longitude    Decimal? @db.Decimal(9, 6)
+  fedDistrict  String?  // e.g. "CA-12"
+  stateDistrict String?
+  // Notification preferences
+  notificationNewBills    Boolean @default(true)
+  notificationBillUpdates Boolean @default(true)
+  notificationEmail       Boolean @default(true)
+  notificationPush        Boolean @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// =============================================================================
+// REPRESENTATIVES
+// =============================================================================
+
+model Representative {
+  id             String   @id @default(cuid())
+  externalId     String   @unique // Congress bioguideId, OpenStates person ID, etc.
+  source         String   // "congress" | "openstates" | "legiscan" | "manual"
+  fullName       String
+  party          String?
+  chamber        String   // "senate" | "house" | "state_senate" | "state_house" | "local"
+  level          String   // "federal" | "state" | "local"
+  stateCode      String?  @db.Char(2)
+  district       String?
+  title          String?  // "Senator", "Representative", "Mayor", etc.
+  photoUrl       String?
+  websiteUrl     String?
+  email          String?
+  phone          String?
+  officeAddress  String?
+  contactFormUrl String?
+  twitterHandle  String?
+  isActive       Boolean  @default(true)
+  termStart      DateTime?
+  termEnd        DateTime?
+  rawData        Json?    // Full API response cached
+  lastSyncedAt   DateTime?
+  // Relations
+  users          UserRepresentative[]
+  sponsoredBills Bill[]   @relation("BillSponsor")
+  cosponsored    BillCosponsor[]
+  messages       SentMessage[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([stateCode])
+  @@index([level])
+  @@index([chamber])
+  @@index([isActive])
+}
+
+// Maps users to their representatives (derived from their address)
+model UserRepresentative {
+  userId           String
+  representativeId String
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  representative   Representative @relation(fields: [representativeId], references: [id], onDelete: Cascade)
+  createdAt        DateTime       @default(now())
+
+  @@id([userId, representativeId])
+}
+
+// =============================================================================
+// BILLS / LEGISLATION
+// =============================================================================
+
+model Bill {
+  id             String   @id @default(cuid())
+  externalId     String   @unique // e.g. "congress:119:hr:1234" or "ocd:..."
+  source         String   // "congress" | "openstates" | "legiscan"
+  congressNumber Int?     // e.g. 119
+  billType       String?  // hr, s, hjres, sjres, sconres, hconres, hres, sres
+  billNumber     String?  // Human-readable, e.g. "H.R. 1234"
+  title          String
+  shortTitle     String?
+  summary        String?  @db.Text
+  status         String   // introduced, committee, floor, passed_chamber, passed, failed, signed, vetoed
+  chamber        String?  // "house" | "senate" | "state_house" | "state_senate"
+  level          String   // "federal" | "state"
+  stateCode      String?  @db.Char(2) // null = federal
+  introducedDate DateTime?
+  lastActionDate DateTime?
+  lastActionText String?
+  sponsorId      String?
+  issueTags      String[] // ["healthcare", "environment", "economy"]
+  url            String?  // Official bill page URL
+  fullTextUrl    String?  // Full bill text URL
+  rawData        Json?    // Full API response cached
+  lastSyncedAt   DateTime?
+  // Relations
+  sponsor        Representative? @relation("BillSponsor", fields: [sponsorId], references: [id])
+  cosponsors     BillCosponsor[]
+  votes          UserVote[]
+  aggregates     BillVoteAggregate?
+  stateAggregates BillVoteAggregateByState[]
+  messages       SentMessage[]
+  notifications  NotificationEvent[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([status])
+  @@index([level])
+  @@index([stateCode])
+  @@index([lastActionDate])
+  @@index([chamber])
+}
+
+model BillCosponsor {
+  billId           String
+  representativeId String
+  bill             Bill           @relation(fields: [billId], references: [id], onDelete: Cascade)
+  representative   Representative @relation(fields: [representativeId], references: [id], onDelete: Cascade)
+  joinedAt         DateTime?
+
+  @@id([billId, representativeId])
+}
+
+// =============================================================================
+// VOTING / OPINIONS
+// =============================================================================
+
+model UserVote {
+  id        String   @id @default(cuid())
+  userId    String
+  billId    String
+  vote      String   // "support" | "oppose" | "neutral"
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bill      Bill     @relation(fields: [billId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, billId])
+  @@index([billId])
+  @@index([userId])
+}
+
+// National aggregate vote counts per bill
+model BillVoteAggregate {
+  billId        String   @id
+  bill          Bill     @relation(fields: [billId], references: [id], onDelete: Cascade)
+  supportCount  Int      @default(0)
+  opposeCount   Int      @default(0)
+  neutralCount  Int      @default(0)
+  totalCount    Int      @default(0)
+  lastUpdatedAt DateTime @default(now())
+}
+
+// Per-state vote aggregates
+model BillVoteAggregateByState {
+  billId       String
+  stateCode    String   @db.Char(2)
+  bill         Bill     @relation(fields: [billId], references: [id], onDelete: Cascade)
+  supportCount Int      @default(0)
+  opposeCount  Int      @default(0)
+  neutralCount Int      @default(0)
+  totalCount   Int      @default(0)
+  updatedAt    DateTime @default(now())
+
+  @@id([billId, stateCode])
+}
+
+// =============================================================================
+// CONTACT / MESSAGING
+// =============================================================================
+
+model SentMessage {
+  id               String         @id @default(cuid())
+  userId           String
+  representativeId String
+  billId           String?
+  channel          String         // "email" | "phone_note" | "form"
+  subject          String?
+  body             String         @db.Text
+  status           String         @default("sent") // "sent" | "delivered" | "failed"
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  representative   Representative @relation(fields: [representativeId], references: [id])
+  bill             Bill?          @relation(fields: [billId], references: [id])
+  sentAt           DateTime       @default(now())
+
+  @@index([userId])
+  @@index([representativeId])
+}
+
+// =============================================================================
+// NOTIFICATIONS
+// =============================================================================
+
+model NotificationEvent {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String   // "new_bill" | "bill_status_change" | "rep_vote"
+  billId    String?
+  payload   Json?    // Extra data (e.g., old status, new status)
+  sentAt    DateTime?
+  readAt    DateTime?
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bill      Bill?    @relation(fields: [billId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@index([userId, readAt])
+  @@index([userId, createdAt])
+}

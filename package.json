@@ -1,0 +1,29 @@
+{
+  "name": "project-knox",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A civic engagement platform for voting on bills and contacting representatives",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "type-check": "turbo run type-check",
+    "db:generate": "cd apps/api && npx prisma generate",
+    "db:migrate": "cd apps/api && npx prisma migrate dev",
+    "db:push": "cd apps/api && npx prisma db push",
+    "db:seed": "cd apps/api && npx prisma db seed",
+    "db:studio": "cd apps/api && npx prisma studio"
+  },
+  "devDependencies": {
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  }
+}

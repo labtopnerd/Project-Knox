@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "plugins": [{ "name": "next" }],
+    "jsx": "preserve",
+    "lib": ["ES2020", "dom", "dom.iterable"],
+    "incremental": true,
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  }
+}

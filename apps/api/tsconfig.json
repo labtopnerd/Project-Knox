@@ -1,0 +1,12 @@
+{
+  "extends": "@project-knox/config/tsconfig.node.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "paths": {
+      "@project-knox/types": ["../../packages/types/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*", "prisma/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
