@@ -2,6 +2,7 @@
  * User profile routes
  * GET  /api/users/me — get current user profile
  * PUT  /api/users/me — update profile
+ * POST /api/users/me/push-token — register Expo push token
  * GET  /api/users/me/messages — sent messages history
  * GET  /api/users/me/notifications — notifications
  * POST /api/users/me/notifications/:id/read — mark notification read
@@ -9,6 +10,7 @@
 
 import { Router, type Response } from 'express'
 import { z } from 'zod'
+import Expo from 'expo-server-sdk'
 import { prisma } from '../lib/prisma'
 import { requireAuth, type AuthRequest } from '../middleware/auth.middleware'
 
@@ -73,6 +75,24 @@ usersRouter.put('/me', async (req: AuthRequest, res: Response): Promise<void> =>
       update: profileUpdates,
     })
   }
+
+  res.json({ success: true })
+})
+
+// POST /api/users/me/push-token
+usersRouter.post('/me/push-token', async (req: AuthRequest, res: Response): Promise<void> => {
+  const { token, platform } = req.body as { token?: string; platform?: string }
+
+  if (!token || !Expo.isExpoPushToken(token)) {
+    res.status(400).json({ error: 'Validation error', message: 'Invalid Expo push token' })
+    return
+  }
+
+  await prisma.deviceToken.upsert({
+    where: { token },
+    create: { userId: req.userId!, token, platform: platform ?? null },
+    update: { userId: req.userId!, platform: platform ?? null },
+  })
 
   res.json({ success: true })
 })

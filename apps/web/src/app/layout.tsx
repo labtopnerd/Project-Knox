@@ -13,6 +13,12 @@ export const metadata: Metadata = {
   description:
     'Vote on bills and policies being considered by your representatives. See where your community stands. Contact your reps directly.',
   keywords: ['civic engagement', 'bills', 'representatives', 'voting', 'politics', 'democracy'],
+  manifest: '/manifest.webmanifest',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'Project Knox',
+  },
   openGraph: {
     title: 'Project Knox',
     description: 'Your voice on the issues that matter',

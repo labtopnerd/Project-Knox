@@ -67,8 +67,22 @@ model User {
   sentMessages  SentMessage[]
   notifications NotificationEvent[]
   representatives UserRepresentative[]
+  deviceTokens  DeviceToken[]
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
+}
+
+// Expo push tokens — one per device, associated with the logged-in user
+model DeviceToken {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique // e.g. "ExponentPushToken[xxxxx]"
+  platform  String?  // "ios" | "android"
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
 }
 
 model UserProfile {

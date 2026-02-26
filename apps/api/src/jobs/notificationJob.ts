@@ -9,6 +9,7 @@
 
 import { prisma } from '../lib/prisma'
 import { sendNewBillsEmail, sendBillStatusEmail } from '../services/notifications/email.service'
+import { sendPushToUsers } from '../services/notifications/push.service'
 
 const CONCURRENCY = 5 // Max parallel email sends
 
@@ -121,11 +122,21 @@ export async function notifyNewBills(lookbackHours: number = 24): Promise<{ noti
 
       if (bills.length === 0) return
 
+      // Send email notification
       await sendNewBillsEmail({
         to: user.email!,
         userName: user.name ?? '',
         bills,
       })
+
+      // Send push notification (non-blocking; service handles missing tokens)
+      const repName = bills[0]?.repName ?? 'your representative'
+      await sendPushToUsers([user.id], {
+        title: '📋 New bill from your rep',
+        body: `${bills.length === 1 ? bills[0]?.title ?? 'A new bill' : `${bills.length} new bills`} from ${repName}`,
+        data: { type: 'new_bill', billId: bills[0]?.id },
+      })
+
       notified++
 
       // Record notification events
@@ -225,6 +236,13 @@ export async function notifyBillStatusChanges(): Promise<{ notified: number; err
           billTitle: bill.title,
           oldStatus: 'introduced',
           newStatus: bill.status,
+        })
+
+        const statusLabel = bill.status.replace(/_/g, ' ')
+        await sendPushToUsers([user.id], {
+          title: '📊 Bill status update',
+          body: `${bill.billNumber ? `${bill.billNumber}: ` : ''}${bill.title.slice(0, 80)} — ${statusLabel}`,
+          data: { type: 'bill_status_change', billId: bill.id, status: bill.status },
         })
 
         await prisma.notificationEvent.create({

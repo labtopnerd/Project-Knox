@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { StatusBar } from 'expo-status-bar'
 import { useEffect } from 'react'
 import { useAuthStore } from '../store/auth'
+import { registerForPushNotifications } from '../lib/notifications'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -12,7 +13,19 @@ const queryClient = new QueryClient({
 
 function AuthLoader({ children }: { children: React.ReactNode }) {
   const loadToken = useAuthStore((s) => s.loadToken)
+  const token = useAuthStore((s) => s.token)
+  const isLoading = useAuthStore((s) => s.isLoading)
+
   useEffect(() => { void loadToken() }, [loadToken])
+
+  // Once auth state is resolved, register for push notifications.
+  // Passes the JWT so the API can associate the device token with the user.
+  useEffect(() => {
+    if (!isLoading) {
+      void registerForPushNotifications(token)
+    }
+  }, [isLoading, token])
+
   return <>{children}</>
 }
 
