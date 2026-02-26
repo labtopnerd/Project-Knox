@@ -1,12 +1,19 @@
 import Redis from 'ioredis'
 
 let redis: Redis | null = null
+let redisUnavailable = false
 
-export function getRedis(): Redis {
+function getRedis(): Redis | null {
+  if (redisUnavailable) return null
   if (!redis) {
     const url = process.env.REDIS_URL ?? process.env.UPSTASH_REDIS_REST_URL
     if (!url) {
-      throw new Error('REDIS_URL or UPSTASH_REDIS_REST_URL environment variable is required')
+      // Cache is optional — degrade gracefully without Redis
+      if (process.env.NODE_ENV !== 'test') {
+        console.warn('[Redis] No REDIS_URL set — caching disabled. Set REDIS_URL for production.')
+      }
+      redisUnavailable = true
+      return null
     }
     redis = new Redis(url, {
       maxRetriesPerRequest: 3,
@@ -32,6 +39,7 @@ export const TTL = {
 export async function cacheGet<T>(key: string): Promise<T | null> {
   try {
     const client = getRedis()
+    if (!client) return null
     const value = await client.get(key)
     if (!value) return null
     return JSON.parse(value) as T
@@ -43,6 +51,7 @@ export async function cacheGet<T>(key: string): Promise<T | null> {
 export async function cacheSet(key: string, value: unknown, ttlSeconds: number): Promise<void> {
   try {
     const client = getRedis()
+    if (!client) return
     await client.set(key, JSON.stringify(value), 'EX', ttlSeconds)
   } catch (err) {
     console.error('[Redis] Cache set error:', err)
@@ -52,6 +61,7 @@ export async function cacheSet(key: string, value: unknown, ttlSeconds: number):
 export async function cacheDelete(key: string): Promise<void> {
   try {
     const client = getRedis()
+    if (!client) return
     await client.del(key)
   } catch (err) {
     console.error('[Redis] Cache delete error:', err)
@@ -61,6 +71,7 @@ export async function cacheDelete(key: string): Promise<void> {
 export async function cacheDeletePattern(pattern: string): Promise<void> {
   try {
     const client = getRedis()
+    if (!client) return
     const keys = await client.keys(pattern)
     if (keys.length > 0) {
       await client.del(...keys)

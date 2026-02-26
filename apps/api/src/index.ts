@@ -19,6 +19,7 @@ import { usersRouter } from './routes/users.routes'
 import { contactRouter } from './routes/contact.routes'
 import { syncRouter } from './routes/sync.routes'
 import { runFullSync } from './jobs/billSync'
+import { runNotificationJob } from './jobs/notificationJob'
 
 const app = express()
 const PORT = parseInt(process.env.PORT ?? '3001', 10)
@@ -76,7 +77,7 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 
 // ─── Scheduled Jobs ───────────────────────────────────────────────────────────
 
-// Run full bill sync every 6 hours: 0 */6 * * *
+// Run full bill sync every 6 hours, then send notifications
 if (process.env.ENABLE_CRON === 'true') {
   cron.schedule('0 */6 * * *', async () => {
     console.log('[Cron] Starting scheduled bill sync...')
@@ -86,8 +87,15 @@ if (process.env.ENABLE_CRON === 'true') {
     } catch (err) {
       console.error('[Cron] Sync failed:', err)
     }
+
+    console.log('[Cron] Starting notification job...')
+    try {
+      await runNotificationJob()
+    } catch (err) {
+      console.error('[Cron] Notification job failed:', err)
+    }
   })
-  console.log('[Cron] Bill sync scheduled every 6 hours')
+  console.log('[Cron] Bill sync + notifications scheduled every 6 hours')
 }
 
 // ─── Start server ─────────────────────────────────────────────────────────────

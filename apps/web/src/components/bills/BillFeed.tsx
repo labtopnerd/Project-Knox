@@ -1,21 +1,35 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
+import { useSearchParams } from 'next/navigation'
 import { BillCard } from './BillCard'
 import { Loader2 } from 'lucide-react'
 import type { BillListResponse } from '@project-knox/types'
 
 interface BillFeedProps {
   forUser?: boolean
-  stateCode?: string
-  level?: 'federal' | 'state' | 'all'
 }
 
-async function fetchBills(params: BillFeedProps): Promise<BillListResponse> {
-  const url = new URL('/api/bills', process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001')
+interface FetchParams {
+  forUser?: boolean
+  level?: string
+  chamber?: string
+  status?: string
+  search?: string
+  tags?: string
+  page?: string
+}
+
+async function fetchBills(params: FetchParams): Promise<BillListResponse> {
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
+  const url = new URL('/api/bills', apiUrl)
   if (params.forUser) url.searchParams.set('forUser', 'true')
-  if (params.stateCode) url.searchParams.set('stateCode', params.stateCode)
-  if (params.level) url.searchParams.set('level', params.level)
+  if (params.level && params.level !== 'all') url.searchParams.set('level', params.level)
+  if (params.chamber && params.chamber !== 'all') url.searchParams.set('chamber', params.chamber)
+  if (params.status && params.status !== 'all') url.searchParams.set('status', params.status)
+  if (params.search) url.searchParams.set('search', params.search)
+  if (params.tags) url.searchParams.set('tags', params.tags)
+  if (params.page) url.searchParams.set('page', params.page)
   url.searchParams.set('limit', '20')
 
   const response = await fetch(url.toString(), { credentials: 'include' })
@@ -23,10 +37,21 @@ async function fetchBills(params: BillFeedProps): Promise<BillListResponse> {
   return response.json() as Promise<BillListResponse>
 }
 
-export function BillFeed({ forUser, stateCode, level }: BillFeedProps) {
+export function BillFeed({ forUser }: BillFeedProps) {
+  // Read filter values directly from URL so BillFilters and BillFeed stay in sync
+  const searchParams = useSearchParams()
+  const level = searchParams.get('level') ?? undefined
+  const chamber = searchParams.get('chamber') ?? undefined
+  const status = searchParams.get('status') ?? undefined
+  const search = searchParams.get('search') ?? undefined
+  const tags = searchParams.get('tags') ?? undefined
+  const page = searchParams.get('page') ?? undefined
+
+  const fetchKey = { forUser, level, chamber, status, search, tags, page }
+
   const { data, isLoading, error } = useQuery({
-    queryKey: ['bills', { forUser, stateCode, level }],
-    queryFn: () => fetchBills({ forUser, stateCode, level }),
+    queryKey: ['bills', fetchKey],
+    queryFn: () => fetchBills(fetchKey),
   })
 
   if (isLoading) {
@@ -60,9 +85,9 @@ export function BillFeed({ forUser, stateCode, level }: BillFeedProps) {
         <BillCard key={bill.id} bill={bill} showVoting />
       ))}
       {data.hasMore && (
-        <div className="py-4 text-center text-sm text-gray-400">
+        <p className="py-4 text-center text-sm text-gray-400">
           Showing {data.bills.length} of {data.total} bills
-        </div>
+        </p>
       )}
     </div>
   )
