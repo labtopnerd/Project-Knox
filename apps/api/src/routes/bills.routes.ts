@@ -188,17 +188,26 @@ billsRouter.get('/:id', optionalAuth, async (req: AuthRequest, res: Response): P
   }
 
   let userVote: string | null = null
+  let isBookmarked = false
   if (req.userId) {
-    const vote = await prisma.userVote.findUnique({
-      where: { userId_billId: { userId: req.userId, billId: bill.id } },
-      select: { vote: true },
-    })
+    const [vote, bookmark] = await Promise.all([
+      prisma.userVote.findUnique({
+        where: { userId_billId: { userId: req.userId, billId: bill.id } },
+        select: { vote: true },
+      }),
+      prisma.billBookmark.findUnique({
+        where: { userId_billId: { userId: req.userId, billId: bill.id } },
+        select: { userId: true },
+      }),
+    ])
     userVote = vote?.vote ?? null
+    isBookmarked = !!bookmark
   }
 
   res.json({
     ...bill,
     userVote,
+    isBookmarked,
     aggregates: bill.aggregates
       ? {
           ...bill.aggregates,
@@ -288,6 +297,71 @@ billsRouter.delete('/:id/vote', requireAuth, async (req: AuthRequest, res: Respo
   await cacheDelete(`bills:aggregates:${billId}`)
 
   res.json({ success: true })
+})
+
+// ─── POST /api/bills/:id/bookmark ─────────────────────────────────────────────
+
+billsRouter.post('/:id/bookmark', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
+  const billId = req.params.id
+  const userId = req.userId!
+
+  const bill = await prisma.bill.findUnique({ where: { id: billId }, select: { id: true } })
+  if (!bill) {
+    res.status(404).json({ error: 'Not Found', message: 'Bill not found' })
+    return
+  }
+
+  await prisma.billBookmark.upsert({
+    where: { userId_billId: { userId, billId } },
+    create: { userId, billId },
+    update: {},
+  })
+
+  res.json({ bookmarked: true })
+})
+
+// ─── DELETE /api/bills/:id/bookmark ───────────────────────────────────────────
+
+billsRouter.delete('/:id/bookmark', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
+  const billId = req.params.id
+  const userId = req.userId!
+
+  await prisma.billBookmark.deleteMany({ where: { userId, billId } })
+  res.json({ bookmarked: false })
+})
+
+// ─── GET /api/bills/bookmarks ─────────────────────────────────────────────────
+
+billsRouter.get('/bookmarks/me', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
+  const { page = '1', limit = '20' } = req.query as Record<string, string>
+  const pageNum = Math.max(1, parseInt(page, 10) || 1)
+  const limitNum = Math.min(50, Math.max(1, parseInt(limit, 10) || 20))
+
+  const [bookmarks, total] = await Promise.all([
+    prisma.billBookmark.findMany({
+      where: { userId: req.userId! },
+      orderBy: { createdAt: 'desc' },
+      skip: (pageNum - 1) * limitNum,
+      take: limitNum,
+      include: {
+        bill: {
+          include: {
+            aggregates: true,
+            sponsor: { select: { id: true, fullName: true, party: true, stateCode: true, chamber: true } },
+          },
+        },
+      },
+    }),
+    prisma.billBookmark.count({ where: { userId: req.userId! } }),
+  ])
+
+  res.json({
+    bills: bookmarks.map((b) => ({ ...b.bill, isBookmarked: true })),
+    total,
+    page: pageNum,
+    limit: limitNum,
+    hasMore: (pageNum - 1) * limitNum + limitNum < total,
+  })
 })
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

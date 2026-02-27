@@ -5,9 +5,11 @@ import { prisma } from '@/lib/prisma'
 import { VoteButtons } from '@/components/bills/VoteButtons'
 import { VoteResultsBar } from '@/components/bills/VoteResultsBar'
 import { BillStatusBadge } from '@/components/bills/BillStatusBadge'
+import { BookmarkButton } from '@/components/bills/BookmarkButton'
+import { ShareButtons } from '@/components/bills/ShareButtons'
 import { RepCard } from '@/components/representatives/RepCard'
 import { ContactForm } from '@/components/contact/ContactForm'
-import { ExternalLink, Calendar, ChevronLeft, FileText } from 'lucide-react'
+import { ExternalLink, Calendar, ChevronLeft, FileText, ThumbsUp } from 'lucide-react'
 import type { Representative } from '@project-knox/types'
 
 export const dynamic = 'force-dynamic'
@@ -22,7 +24,7 @@ export async function generateMetadata({ params }: { params: Params }) {
 export default async function BillDetailPage({ params }: { params: Params }) {
   const session = await auth()
 
-  const [bill, userVoteRow] = await Promise.all([
+  const [bill, userVoteRow, bookmarkRow] = await Promise.all([
     prisma.bill.findUnique({
       where: { id: params.id },
       include: {
@@ -42,11 +44,18 @@ export default async function BillDetailPage({ params }: { params: Params }) {
           select: { vote: true },
         })
       : null,
+    session?.user?.id
+      ? prisma.billBookmark.findUnique({
+          where: { userId_billId: { userId: session.user.id, billId: params.id } },
+          select: { userId: true },
+        })
+      : null,
   ])
 
   if (!bill) notFound()
 
   const userVote = (userVoteRow?.vote ?? null) as 'support' | 'oppose' | 'neutral' | null
+  const isBookmarked = !!bookmarkRow
 
   const aggregates = bill.aggregates
     ? {
@@ -72,6 +81,9 @@ export default async function BillDetailPage({ params }: { params: Params }) {
 
   // We need the sponsor as a Representative type for RepCard/ContactForm
   const sponsor = bill.sponsor as Representative | null
+
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
+  const billShareUrl = `${appUrl}/bills/${bill.id}`
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -99,7 +111,12 @@ export default async function BillDetailPage({ params }: { params: Params }) {
               </span>
             )}
           </div>
-          <BillStatusBadge status={bill.status as string} />
+          <div className="flex items-center gap-2">
+            {session && (
+              <BookmarkButton billId={bill.id} initialBookmarked={isBookmarked} />
+            )}
+            <BillStatusBadge status={bill.status as string} />
+          </div>
         </div>
 
         <h1 className="mb-4 text-xl font-bold text-gray-900 leading-snug">{bill.title}</h1>
@@ -219,7 +236,13 @@ export default async function BillDetailPage({ params }: { params: Params }) {
       {/* Sponsor */}
       {sponsor && (
         <section className="mb-6 rounded-xl border border-gray-100 bg-white p-6 shadow-sm">
-          <h2 className="mb-4 text-base font-semibold text-gray-900">Sponsor</h2>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-base font-semibold text-gray-900">Sponsor</h2>
+            <span className="flex items-center gap-1.5 rounded-full bg-green-50 px-3 py-1 text-xs font-semibold text-green-700">
+              <ThumbsUp className="h-3.5 w-3.5" />
+              Supports this bill
+            </span>
+          </div>
           <RepCard rep={sponsor} compact />
         </section>
       )}
@@ -227,9 +250,15 @@ export default async function BillDetailPage({ params }: { params: Params }) {
       {/* Cosponsors */}
       {bill.cosponsors.length > 0 && (
         <section className="mb-6 rounded-xl border border-gray-100 bg-white p-6 shadow-sm">
-          <h2 className="mb-4 text-base font-semibold text-gray-900">
-            Cosponsors ({bill.cosponsors.length})
-          </h2>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-base font-semibold text-gray-900">
+              Cosponsors ({bill.cosponsors.length})
+            </h2>
+            <span className="flex items-center gap-1.5 rounded-full bg-green-50 px-3 py-1 text-xs font-semibold text-green-700">
+              <ThumbsUp className="h-3.5 w-3.5" />
+              All support this bill
+            </span>
+          </div>
           <div className="grid gap-3 sm:grid-cols-2">
             {bill.cosponsors.map((cs) => (
               <RepCard key={cs.representativeId} rep={cs.representative as Representative} compact />
@@ -250,6 +279,15 @@ export default async function BillDetailPage({ params }: { params: Params }) {
           <ContactForm rep={sponsor} billId={bill.id} billTitle={bill.title} />
         </section>
       )}
+
+      {/* Share */}
+      <section className="mb-6 rounded-xl border border-gray-100 bg-white p-6 shadow-sm">
+        <h2 className="mb-3 text-base font-semibold text-gray-900">Spread the word</h2>
+        <p className="mb-4 text-sm text-gray-500">
+          Help others stay informed — share this bill with friends, family, or on social media.
+        </p>
+        <ShareButtons billTitle={bill.title} billUrl={billShareUrl} />
+      </section>
     </div>
   )
 }

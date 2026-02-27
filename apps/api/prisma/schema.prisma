@@ -64,6 +64,7 @@ model User {
   sessions      Session[]
   profile       UserProfile?
   votes         UserVote[]
+  bookmarks     BillBookmark[]
   sentMessages  SentMessage[]
   notifications NotificationEvent[]
   representatives UserRepresentative[]
@@ -188,6 +189,7 @@ model Bill {
   sponsor        Representative? @relation("BillSponsor", fields: [sponsorId], references: [id])
   cosponsors     BillCosponsor[]
   votes          UserVote[]
+  bookmarks      BillBookmark[]
   aggregates     BillVoteAggregate?
   stateAggregates BillVoteAggregateByState[]
   messages       SentMessage[]
@@ -228,6 +230,18 @@ model UserVote {
 
   @@unique([userId, billId])
   @@index([billId])
+  @@index([userId])
+}
+
+// Bills saved to a user's watchlist
+model BillBookmark {
+  userId    String
+  billId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bill      Bill     @relation(fields: [billId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([userId, billId])
   @@index([userId])
 }
 
