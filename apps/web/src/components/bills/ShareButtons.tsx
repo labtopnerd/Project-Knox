@@ -46,12 +46,12 @@ export function ShareButtons({ billTitle, billUrl }: ShareButtonsProps) {
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <span className="text-sm text-gray-500">Share:</span>
+      <span className="text-sm text-muted-foreground">Share:</span>
 
       {/* Copy link */}
       <button
         onClick={copyLink}
-        className="flex items-center gap-1.5 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-600 transition hover:border-gray-300 hover:bg-gray-50"
+        className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-sm font-medium text-foreground transition hover:bg-muted"
         aria-label="Copy link to bill"
       >
         {copied ? (
@@ -72,7 +72,7 @@ export function ShareButtons({ billTitle, billUrl }: ShareButtonsProps) {
         href={twitterUrl}
         target="_blank"
         rel="noopener noreferrer"
-        className="flex items-center gap-1.5 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-600 transition hover:border-gray-300 hover:bg-gray-50"
+        className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-sm font-medium text-foreground transition hover:bg-muted"
         aria-label="Share on X (Twitter)"
       >
         {/* X logo SVG */}
@@ -85,7 +85,7 @@ export function ShareButtons({ billTitle, billUrl }: ShareButtonsProps) {
       {/* Native share (mobile) */}
       <button
         onClick={nativeShare}
-        className="flex items-center gap-1.5 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-600 transition hover:border-gray-300 hover:bg-gray-50 sm:hidden"
+        className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-sm font-medium text-foreground transition hover:bg-muted sm:hidden"
         aria-label="Share via device"
       >
         <Share2 className="h-3.5 w-3.5" />

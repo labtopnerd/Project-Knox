@@ -21,8 +21,8 @@ export default async function FeedPage() {
   return (
     <div className="mx-auto max-w-3xl px-4 py-8">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">My Feed</h1>
-        <p className="mt-1 text-gray-500">
+        <h1 className="text-2xl font-bold text-foreground">My Feed</h1>
+        <p className="mt-1 text-muted-foreground">
           Bills from your representatives in Congress and your state legislature
         </p>
       </div>

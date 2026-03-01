@@ -223,7 +223,7 @@ representativesRouter.post('/lookup', optionalAuth, async (req: AuthRequest, res
           ? `${geoResult.stateCode}-${geoResult.congressionalDistrict}`
           : null,
         stateDistrict: geoResult.stateDistrict || null,
-        addressLine1: address ?? null,
+        addressLine1: geoResult.matchedAddress || address || null,
         zipCode: zipCode ?? null,
       },
       update: {
@@ -234,7 +234,7 @@ representativesRouter.post('/lookup', optionalAuth, async (req: AuthRequest, res
           ? `${geoResult.stateCode}-${geoResult.congressionalDistrict}`
           : null,
         stateDistrict: geoResult.stateDistrict || null,
-        ...(address ? { addressLine1: address } : {}),
+        addressLine1: geoResult.matchedAddress || address || null,
         ...(zipCode ? { zipCode } : {}),
       },
     })

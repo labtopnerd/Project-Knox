@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from 'next/navigation'
 import { BillCard } from './BillCard'
 import { Loader2, ChevronLeft, ChevronRight } from 'lucide-react'
 import type { BillListResponse } from '@project-knox/types'
+import { apiFetch } from '@/lib/api-client'
 
 interface BillFeedProps {
   forUser?: boolean
@@ -21,18 +22,17 @@ interface FetchParams {
 }
 
 async function fetchBills(params: FetchParams): Promise<BillListResponse> {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
-  const url = new URL('/api/bills', apiUrl)
-  if (params.forUser) url.searchParams.set('forUser', 'true')
-  if (params.level && params.level !== 'all') url.searchParams.set('level', params.level)
-  if (params.chamber && params.chamber !== 'all') url.searchParams.set('chamber', params.chamber)
-  if (params.status && params.status !== 'all') url.searchParams.set('status', params.status)
-  if (params.search) url.searchParams.set('search', params.search)
-  if (params.tags) url.searchParams.set('tags', params.tags)
-  if (params.page) url.searchParams.set('page', params.page)
-  url.searchParams.set('limit', '20')
+  const query = new URLSearchParams()
+  if (params.forUser) query.set('forUser', 'true')
+  if (params.level && params.level !== 'all') query.set('level', params.level)
+  if (params.chamber && params.chamber !== 'all') query.set('chamber', params.chamber)
+  if (params.status && params.status !== 'all') query.set('status', params.status)
+  if (params.search) query.set('search', params.search)
+  if (params.tags) query.set('tags', params.tags)
+  if (params.page) query.set('page', params.page)
+  query.set('limit', '20')
 
-  const response = await fetch(url.toString(), { credentials: 'include' })
+  const response = await apiFetch(`/api/bills?${query.toString()}`)
   if (!response.ok) throw new Error('Failed to fetch bills')
   return response.json() as Promise<BillListResponse>
 }

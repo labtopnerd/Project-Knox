@@ -3,8 +3,10 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ThumbsUp, ThumbsDown, Minus } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import type { VotePosition } from '@project-knox/types'
+import { apiFetch } from '@/lib/api-client'
 
 interface VoteButtonsProps {
   billId: string
@@ -23,37 +25,35 @@ const VOTE_OPTIONS: {
   label: string
   icon: typeof ThumbsUp
   activeClass: string
-  hoverClass: string
+  inactiveClass: string
 }[] = [
   {
     position: 'support',
     label: 'Support',
     icon: ThumbsUp,
-    activeClass: 'bg-support text-white border-support',
-    hoverClass: 'hover:border-support hover:text-support',
+    activeClass: 'border-support bg-support text-white hover:bg-support/90',
+    inactiveClass: 'border-support/40 text-support hover:border-support hover:bg-support/10',
   },
   {
     position: 'neutral',
     label: 'Neutral',
     icon: Minus,
-    activeClass: 'bg-neutral-500 text-white border-neutral-500',
-    hoverClass: 'hover:border-gray-400 hover:text-gray-600',
+    activeClass: 'border-slate-500 bg-slate-500 text-white hover:bg-slate-500/90',
+    inactiveClass: 'border-slate-300 text-slate-600 hover:border-slate-400 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-400 dark:hover:bg-slate-800',
   },
   {
     position: 'oppose',
     label: 'Oppose',
     icon: ThumbsDown,
-    activeClass: 'bg-oppose text-white border-oppose',
-    hoverClass: 'hover:border-oppose hover:text-oppose',
+    activeClass: 'border-crimson-600 bg-crimson-600 text-white hover:bg-crimson-700',
+    inactiveClass: 'border-crimson-300 text-crimson-600 hover:border-crimson-600 hover:bg-crimson-50 dark:border-crimson-800 dark:text-crimson-400 dark:hover:bg-slate-800',
   },
 ]
 
 async function submitVote(billId: string, position: VotePosition): Promise<void> {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
-  const response = await fetch(`${apiUrl}/api/bills/${billId}/vote`, {
+  const response = await apiFetch(`/api/bills/${billId}/vote`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
     body: JSON.stringify({ position }),
   })
   if (!response.ok) throw new Error('Failed to submit vote')
@@ -66,15 +66,12 @@ export function VoteButtons({ billId, currentVote, disabled }: VoteButtonsProps)
   const { mutate, isPending } = useMutation({
     mutationFn: (position: VotePosition) => submitVote(billId, position),
     onMutate: (position) => {
-      // Optimistic update
       setOptimisticVote(position)
     },
     onError: () => {
-      // Rollback on error
       setOptimisticVote(currentVote)
     },
     onSuccess: () => {
-      // Invalidate to refetch fresh aggregates
       void queryClient.invalidateQueries({ queryKey: ['bills'] })
       void queryClient.invalidateQueries({ queryKey: ['bill', billId] })
     },
@@ -87,25 +84,26 @@ export function VoteButtons({ billId, currentVote, disabled }: VoteButtonsProps)
 
   return (
     <div className="flex items-center gap-2">
-      <span className="text-sm text-gray-500 mr-1">Your vote:</span>
-      {VOTE_OPTIONS.map(({ position, label, icon: Icon, activeClass, hoverClass }) => {
+      <span className="mr-1 text-sm text-slate-500 dark:text-slate-400">Your vote:</span>
+      {VOTE_OPTIONS.map(({ position, label, icon: Icon, activeClass, inactiveClass }) => {
         const isActive = optimisticVote === position
         return (
-          <button
+          <Button
             key={position}
+            variant="outline"
+            size="sm"
             onClick={() => handleVote(position)}
             disabled={disabled || isPending}
             aria-label={`Vote ${label}`}
             aria-pressed={isActive}
             className={cn(
-              'flex items-center gap-1.5 rounded-full border-2 px-3 py-1.5 text-sm font-medium transition-all',
-              'disabled:cursor-not-allowed disabled:opacity-50',
-              isActive ? activeClass : cn('border-gray-200 text-gray-600 bg-white', hoverClass),
+              'rounded-full border-2 font-medium transition-all',
+              isActive ? activeClass : inactiveClass,
             )}
           >
-            <Icon className="h-4 w-4" />
+            <Icon className="h-3.5 w-3.5" />
             {label}
-          </button>
+          </Button>
         )
       })}
     </div>

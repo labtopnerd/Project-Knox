@@ -5,7 +5,8 @@ import { Calendar, MapPin, ExternalLink } from 'lucide-react'
 import { VoteButtons } from './VoteButtons'
 import { VoteResultsBar } from './VoteResultsBar'
 import { BillStatusBadge } from './BillStatusBadge'
-import { cn } from '@/lib/utils'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card'
 import type { BillWithUserVote } from '@project-knox/types'
 
 interface BillCardProps {
@@ -14,89 +15,86 @@ interface BillCardProps {
 }
 
 export function BillCard({ bill, showVoting = true }: BillCardProps) {
-  const chamberLabel = {
+  const CHAMBER_LABELS: Record<string, string> = {
     house: 'U.S. House',
     senate: 'U.S. Senate',
     state_house: `${bill.stateCode} House`,
     state_senate: `${bill.stateCode} Senate`,
-  }[bill.chamber ?? ''] ?? bill.chamber
+  }
+  const chamberLabel = bill.chamber ? (CHAMBER_LABELS[bill.chamber] ?? bill.chamber) : undefined
 
   return (
-    <article className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm transition hover:shadow-md">
-      {/* Header */}
-      <div className="mb-3 flex items-start justify-between gap-3">
-        <div className="flex-1 min-w-0">
-          {bill.billNumber && (
-            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-400">
-              {bill.billNumber}
+    <Card className="border-slate-200 bg-white shadow-sm transition-all duration-150 hover:-translate-y-px hover:shadow-md dark:border-slate-700 dark:bg-slate-800">
+      <CardHeader className="pb-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            {bill.billNumber && (
+              <span className="mb-1 block font-mono text-xs font-semibold uppercase tracking-wide text-navy-900 dark:text-blue-400">
+                {bill.billNumber}
+              </span>
+            )}
+            <Link
+              href={`/bills/${bill.id}`}
+              className="text-base font-semibold text-slate-900 hover:text-navy-900 line-clamp-2 dark:text-white dark:hover:text-blue-400"
+            >
+              {bill.title}
+            </Link>
+          </div>
+          <BillStatusBadge status={bill.status} />
+        </div>
+      </CardHeader>
+
+      <CardContent className="pb-3 pt-0">
+        {/* Summary */}
+        {bill.summary && (
+          <p className="mb-4 text-sm text-slate-600 line-clamp-3 dark:text-slate-400">{bill.summary}</p>
+        )}
+
+        {/* Meta */}
+        <div className="mb-4 flex flex-wrap items-center gap-3 text-xs text-slate-400 dark:text-slate-500">
+          {chamberLabel && (
+            <span className="flex items-center gap-1">
+              <MapPin className="h-3 w-3" />
+              {chamberLabel}
             </span>
           )}
-          <Link
-            href={`/bills/${bill.id}`}
-            className="text-base font-semibold text-gray-900 hover:text-primary-600 line-clamp-2"
-          >
-            {bill.title}
-          </Link>
-        </div>
-        <BillStatusBadge status={bill.status} />
-      </div>
-
-      {/* Summary */}
-      {bill.summary && (
-        <p className="mb-4 text-sm text-gray-600 line-clamp-3">{bill.summary}</p>
-      )}
-
-      {/* Meta */}
-      <div className="mb-4 flex flex-wrap items-center gap-3 text-xs text-gray-400">
-        {chamberLabel && (
-          <span className="flex items-center gap-1">
-            <MapPin className="h-3 w-3" />
-            {chamberLabel}
-          </span>
-        )}
-        {bill.lastActionDate && (
-          <span className="flex items-center gap-1">
-            <Calendar className="h-3 w-3" />
-            {new Date(bill.lastActionDate).toLocaleDateString('en-US', {
-              month: 'short',
-              day: 'numeric',
-              year: 'numeric',
-            })}
-          </span>
-        )}
-        {bill.sponsorName && (
-          <span>Sponsor: {bill.sponsorName}</span>
-        )}
-        {bill.url && (
-          <a
-            href={bill.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1 hover:text-primary-600"
-          >
-            <ExternalLink className="h-3 w-3" />
-            Official page
-          </a>
-        )}
-      </div>
-
-      {/* Tags */}
-      {bill.issueTags.length > 0 && (
-        <div className="mb-4 flex flex-wrap gap-1.5">
-          {bill.issueTags.slice(0, 5).map((tag) => (
-            <span
-              key={tag}
-              className="rounded-full bg-primary-50 px-2.5 py-0.5 text-xs font-medium text-primary-700"
-            >
-              {tag}
+          {bill.lastActionDate && (
+            <span className="flex items-center gap-1">
+              <Calendar className="h-3 w-3" />
+              {new Date(bill.lastActionDate).toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+              })}
             </span>
-          ))}
+          )}
+          {bill.sponsorName && <span>Sponsor: {bill.sponsorName}</span>}
+          {bill.url && (
+            <a
+              href={bill.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 hover:text-navy-900 dark:hover:text-blue-400"
+            >
+              <ExternalLink className="h-3 w-3" />
+              Official page
+            </a>
+          )}
         </div>
-      )}
 
-      {/* Poll results */}
-      {bill.aggregates && (
-        <div className="mb-4">
+        {/* Issue tags */}
+        {bill.issueTags.length > 0 && (
+          <div className="mb-4 flex flex-wrap gap-1.5">
+            {bill.issueTags.slice(0, 5).map((tag) => (
+              <Badge key={tag} variant="secondary" className="text-xs">
+                {tag}
+              </Badge>
+            ))}
+          </div>
+        )}
+
+        {/* Poll results */}
+        {bill.aggregates && (
           <VoteResultsBar
             supportCount={bill.aggregates.supportCount}
             opposeCount={bill.aggregates.opposeCount}
@@ -104,15 +102,14 @@ export function BillCard({ bill, showVoting = true }: BillCardProps) {
             totalCount={bill.aggregates.totalCount}
             compact
           />
-        </div>
-      )}
+        )}
+      </CardContent>
 
-      {/* Vote buttons */}
       {showVoting && (
-        <div className="border-t border-gray-50 pt-4">
+        <CardFooter className="border-t border-slate-100 pt-3 dark:border-slate-700">
           <VoteButtons billId={bill.id} currentVote={bill.userVote} aggregates={bill.aggregates} />
-        </div>
+        </CardFooter>
       )}
-    </article>
+    </Card>
   )
 }

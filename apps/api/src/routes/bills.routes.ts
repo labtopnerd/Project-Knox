@@ -63,19 +63,30 @@ billsRouter.get('/', optionalAuth, async (req: AuthRequest, res: Response): Prom
     ]
   }
 
-  // Filter to user's representatives if authenticated and forUser=true
+  // Filter to bills relevant to the user when forUser=true:
+  // federal bills + bills from the user's state + bills sponsored by their reps
   if (forUser === 'true' && req.userId) {
-    const userReps = await prisma.userRepresentative.findMany({
-      where: { userId: req.userId },
-      select: { representativeId: true },
-    })
+    const [userReps, userProfile] = await Promise.all([
+      prisma.userRepresentative.findMany({
+        where: { userId: req.userId },
+        select: { representativeId: true },
+      }),
+      prisma.userProfile.findUnique({
+        where: { id: req.userId },
+        select: { stateCode: true },
+      }),
+    ])
     const repIds = userReps.map((ur) => ur.representativeId)
-    if (repIds.length > 0) {
-      where.OR = [
-        { sponsorId: { in: repIds } },
-        { cosponsors: { some: { representativeId: { in: repIds } } } },
-      ]
+
+    const orClauses: Record<string, unknown>[] = [{ level: 'federal' }]
+    if (userProfile?.stateCode) {
+      orClauses.push({ stateCode: userProfile.stateCode })
     }
+    if (repIds.length > 0) {
+      orClauses.push({ sponsorId: { in: repIds } })
+      orClauses.push({ cosponsors: { some: { representativeId: { in: repIds } } } })
+    }
+    where.OR = orClauses
   }
 
   const [bills, total] = await Promise.all([

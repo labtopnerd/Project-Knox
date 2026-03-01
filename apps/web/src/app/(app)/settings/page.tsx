@@ -3,14 +3,27 @@
 import { useState, useEffect } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
-import { Loader2, CheckCircle, MapPin, Bell, User, History } from 'lucide-react'
+import { Loader2, CheckCircle, MapPin, Bell, User, History, Check, RotateCcw } from 'lucide-react'
+import { apiFetch } from '@/lib/api-client'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Separator } from '@/components/ui/separator'
+import { cn } from '@/lib/utils'
 
 interface UserProfile {
   zipCode?: string
   stateCode?: string
+  matchedAddress?: string
   notificationNewBills: boolean
   notificationBillUpdates: boolean
   notificationEmail: boolean
+}
+
+interface PendingLocation {
+  matchedAddress: string
+  stateCode: string
+  repCount: number
 }
 
 interface SentMessage {
@@ -33,10 +46,10 @@ export default function SettingsPage() {
   const [savingProfile, setSavingProfile] = useState(false)
   const [savedProfile, setSavedProfile] = useState(false)
 
-  // Location lookup state
   const [lookupInput, setLookupInput] = useState('')
   const [lookupLoading, setLookupLoading] = useState(false)
-  const [lookupResult, setLookupResult] = useState<string | null>(null)
+  const [lookupError, setLookupError] = useState<string | null>(null)
+  const [pendingLocation, setPendingLocation] = useState<PendingLocation | null>(null)
 
   useEffect(() => {
     if (status === 'unauthenticated') router.push('/login')
@@ -45,16 +58,15 @@ export default function SettingsPage() {
   useEffect(() => {
     if (status !== 'authenticated') return
 
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
-
     Promise.all([
-      fetch(`${apiUrl}/api/users/me`, { credentials: 'include' }).then((r) => r.json()),
-      fetch(`${apiUrl}/api/users/me/messages?limit=10`, { credentials: 'include' }).then((r) => r.json()),
+      apiFetch('/api/users/me').then((r) => r.json()),
+      apiFetch('/api/users/me/messages?limit=10').then((r) => r.json()),
     ]).then(([userData, msgData]) => {
       if (userData.user?.profile) {
         setProfile({
           zipCode: userData.user.profile.zipCode ?? '',
           stateCode: userData.user.profile.stateCode ?? '',
+          matchedAddress: userData.user.profile.addressLine1 ?? '',
           notificationNewBills: userData.user.profile.notificationNewBills ?? true,
           notificationBillUpdates: userData.user.profile.notificationBillUpdates ?? true,
           notificationEmail: userData.user.profile.notificationEmail ?? true,
@@ -63,6 +75,7 @@ export default function SettingsPage() {
         setProfile({
           zipCode: '',
           stateCode: '',
+          matchedAddress: '',
           notificationNewBills: true,
           notificationBillUpdates: true,
           notificationEmail: true,
@@ -78,17 +91,16 @@ export default function SettingsPage() {
     if (!lookupInput.trim()) return
 
     setLookupLoading(true)
-    setLookupResult(null)
+    setLookupError(null)
+    setPendingLocation(null)
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
       const isZip = /^\d{5}$/.test(lookupInput.trim())
       const body = isZip ? { zipCode: lookupInput.trim() } : { address: lookupInput.trim() }
 
-      const res = await fetch(`${apiUrl}/api/representatives/lookup`, {
+      const res = await apiFetch('/api/representatives/lookup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify(body),
       })
 
@@ -99,21 +111,36 @@ export default function SettingsPage() {
       }
 
       if (!res.ok || data.error) {
-        setLookupResult('Could not find representatives for that location. Try a full address.')
+        setLookupError('Could not find representatives for that location. Try a full address like "123 Main St, Springfield, IL".')
       } else {
-        const count = data.representatives?.length ?? 0
-        setLookupResult(
-          `Found ${count} representative${count !== 1 ? 's' : ''} for ${data.location?.matchedAddress ?? lookupInput}. Your feed has been updated.`,
-        )
-        if (profile && data.location?.stateCode) {
-          setProfile({ ...profile, stateCode: data.location.stateCode })
-        }
+        setPendingLocation({
+          matchedAddress: data.location?.matchedAddress ?? lookupInput,
+          stateCode: data.location?.stateCode ?? '',
+          repCount: data.representatives?.length ?? 0,
+        })
       }
     } catch {
-      setLookupResult('Something went wrong. Please try again.')
+      setLookupError('Something went wrong. Please try again.')
     } finally {
       setLookupLoading(false)
     }
+  }
+
+  const confirmLocation = () => {
+    if (!pendingLocation || !profile) return
+    setProfile({
+      ...profile,
+      stateCode: pendingLocation.stateCode,
+      matchedAddress: pendingLocation.matchedAddress,
+    })
+    setPendingLocation(null)
+    setLookupInput('')
+  }
+
+  const retryLocation = () => {
+    setPendingLocation(null)
+    setLookupError(null)
+    setLookupInput('')
   }
 
   const handleSaveNotifications = async () => {
@@ -121,11 +148,9 @@ export default function SettingsPage() {
     setSavingProfile(true)
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
-      await fetch(`${apiUrl}/api/users/me`, {
+      await apiFetch('/api/users/me', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify({
           notificationNewBills: profile.notificationNewBills,
           notificationBillUpdates: profile.notificationBillUpdates,
@@ -142,160 +167,228 @@ export default function SettingsPage() {
   if (status === 'loading' || loadingProfile) {
     return (
       <div className="flex items-center justify-center py-20">
-        <Loader2 className="h-8 w-8 animate-spin text-primary-500" />
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     )
   }
 
+  const hasLocation = profile?.stateCode
+
   return (
-    <div className="mx-auto max-w-2xl space-y-8">
-      <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
+    <div className="mx-auto max-w-2xl space-y-6">
+      <h1 className="text-2xl font-bold text-foreground">Settings</h1>
 
       {/* Account */}
-      <section className="rounded-xl border border-gray-100 bg-white p-6 shadow-sm">
-        <h2 className="mb-4 flex items-center gap-2 text-base font-semibold text-gray-900">
-          <User className="h-4 w-4" />
-          Account
-        </h2>
-        <div className="space-y-2 text-sm">
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <User className="h-4 w-4" />
+            Account
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2 text-sm">
           <div className="flex items-center justify-between py-1">
-            <span className="text-gray-500">Name</span>
-            <span className="font-medium text-gray-900">{session?.user?.name ?? '—'}</span>
+            <span className="text-muted-foreground">Name</span>
+            <span className="font-medium">{session?.user?.name ?? '—'}</span>
           </div>
+          <Separator />
           <div className="flex items-center justify-between py-1">
-            <span className="text-gray-500">Email</span>
-            <span className="font-medium text-gray-900">{session?.user?.email}</span>
+            <span className="text-muted-foreground">Email</span>
+            <span className="font-medium">{session?.user?.email}</span>
           </div>
-          {profile?.stateCode && (
-            <div className="flex items-center justify-between py-1">
-              <span className="text-gray-500">State</span>
-              <span className="font-medium text-gray-900">{profile.stateCode}</span>
-            </div>
-          )}
-        </div>
-      </section>
+        </CardContent>
+      </Card>
 
       {/* Location */}
-      <section className="rounded-xl border border-gray-100 bg-white p-6 shadow-sm" id="location">
-        <h2 className="mb-1 flex items-center gap-2 text-base font-semibold text-gray-900">
-          <MapPin className="h-4 w-4" />
-          Your location
-        </h2>
-        <p className="mb-5 text-sm text-gray-500">
-          Enter your address or zip code to find your representatives and personalize your feed.
-        </p>
-        <form onSubmit={handleLookup} className="flex gap-2">
-          <input
-            type="text"
-            value={lookupInput}
-            onChange={(e) => setLookupInput(e.target.value)}
-            placeholder="Enter address or zip code…"
-            className="flex-1 rounded-lg border border-gray-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-          />
-          <button
-            type="submit"
-            disabled={lookupLoading || !lookupInput.trim()}
-            className="flex items-center gap-1.5 rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-50"
-          >
-            {lookupLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Find reps'}
-          </button>
-        </form>
-        {lookupResult && (
-          <p className="mt-3 text-sm text-gray-600">{lookupResult}</p>
-        )}
-      </section>
+      <Card id="location">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <MapPin className="h-4 w-4" />
+            Your location
+          </CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Used to find your representatives and personalize your feed.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Current saved location */}
+          {hasLocation && (
+            <div className="rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm">
+              <p className="mb-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Current location
+              </p>
+              <p className="font-medium text-foreground">
+                {profile.matchedAddress
+                  ? profile.matchedAddress
+                  : [profile.zipCode, profile.stateCode].filter(Boolean).join(', ')}
+              </p>
+            </div>
+          )}
+
+          {/* Pending confirmation */}
+          {pendingLocation ? (
+            <div className="space-y-3">
+              <div className="rounded-lg border border-navy-200 bg-navy-50 px-4 py-3 text-sm dark:border-navy-800 dark:bg-navy-900/20">
+                <p className="mb-0.5 text-xs font-medium uppercase tracking-wide text-navy-700 dark:text-blue-400">
+                  Location found
+                </p>
+                <p className="font-medium text-navy-900 dark:text-blue-200">
+                  {pendingLocation.matchedAddress}
+                </p>
+                <p className="mt-0.5 text-xs text-navy-600 dark:text-blue-300">
+                  {pendingLocation.repCount} representative{pendingLocation.repCount !== 1 ? 's' : ''} found
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  onClick={confirmLocation}
+                  className="gap-2 bg-navy-900 text-white hover:bg-navy-800"
+                >
+                  <Check className="h-4 w-4" />
+                  Use this location
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={retryLocation}
+                  className="gap-2"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  Try different
+                </Button>
+              </div>
+            </div>
+          ) : (
+            /* Lookup form */
+            <div className="space-y-2">
+              <form onSubmit={handleLookup} className="flex gap-2">
+                <Input
+                  value={lookupInput}
+                  onChange={(e) => setLookupInput(e.target.value)}
+                  placeholder="ZIP code or full address…"
+                  className="flex-1"
+                />
+                <Button
+                  type="submit"
+                  disabled={lookupLoading || !lookupInput.trim()}
+                  className="bg-navy-900 text-white hover:bg-navy-800"
+                >
+                  {lookupLoading
+                    ? <Loader2 className="h-4 w-4 animate-spin" />
+                    : hasLocation ? 'Update' : 'Find reps'}
+                </Button>
+              </form>
+              {lookupError && (
+                <p className="text-sm text-crimson-600 dark:text-red-400">{lookupError}</p>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Notifications */}
-      <section className="rounded-xl border border-gray-100 bg-white p-6 shadow-sm">
-        <h2 className="mb-4 flex items-center gap-2 text-base font-semibold text-gray-900">
-          <Bell className="h-4 w-4" />
-          Notifications
-        </h2>
-        {profile && (
-          <div className="space-y-4">
-            {(
-              [
-                { key: 'notificationNewBills', label: 'New bills from my representatives' },
-                { key: 'notificationBillUpdates', label: 'Bill status changes (passed, signed, etc.)' },
-                { key: 'notificationEmail', label: 'Send alerts by email' },
-              ] as { key: keyof UserProfile; label: string }[]
-            ).map(({ key, label }) => (
-              <label key={key} className="flex cursor-pointer items-center justify-between">
-                <span className="text-sm text-gray-700">{label}</span>
-                <button
-                  role="switch"
-                  aria-checked={profile[key] as boolean}
-                  onClick={() => setProfile({ ...profile, [key]: !profile[key] })}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                    profile[key] ? 'bg-primary-600' : 'bg-gray-200'
-                  }`}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Bell className="h-4 w-4" />
+            Notifications
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {profile && (
+            <div className="space-y-4">
+              {(
+                [
+                  { key: 'notificationNewBills', label: 'New bills from my representatives' },
+                  { key: 'notificationBillUpdates', label: 'Bill status changes (passed, signed, etc.)' },
+                  { key: 'notificationEmail', label: 'Send alerts by email' },
+                ] as { key: keyof UserProfile; label: string }[]
+              ).map(({ key, label }, i, arr) => (
+                <div key={key}>
+                  <label className="flex cursor-pointer items-center justify-between">
+                    <span className="text-sm text-foreground">{label}</span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={profile[key] as boolean}
+                      onClick={() => setProfile({ ...profile, [key]: !profile[key] })}
+                      className={cn(
+                        'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+                        profile[key] ? 'bg-navy-900' : 'bg-slate-200 dark:bg-slate-700',
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+                          profile[key] ? 'translate-x-6' : 'translate-x-1',
+                        )}
+                      />
+                    </button>
+                  </label>
+                  {i < arr.length - 1 && <Separator className="mt-4" />}
+                </div>
+              ))}
+              <div className="pt-2">
+                <Button
+                  onClick={handleSaveNotifications}
+                  disabled={savingProfile}
+                  className="bg-navy-900 text-white hover:bg-navy-800"
                 >
-                  <span
-                    className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-                      profile[key] ? 'translate-x-6' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
-              </label>
-            ))}
-
-            <div className="pt-2">
-              <button
-                onClick={handleSaveNotifications}
-                disabled={savingProfile}
-                className="flex items-center gap-2 rounded-lg bg-primary-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-50"
-              >
-                {savingProfile ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : savedProfile ? (
-                  <CheckCircle className="h-4 w-4" />
-                ) : null}
-                {savedProfile ? 'Saved!' : 'Save preferences'}
-              </button>
+                  {savingProfile ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : savedProfile ? (
+                    <CheckCircle className="mr-2 h-4 w-4" />
+                  ) : null}
+                  {savedProfile ? 'Saved!' : 'Save preferences'}
+                </Button>
+              </div>
             </div>
-          </div>
-        )}
-      </section>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Message history */}
-      <section className="rounded-xl border border-gray-100 bg-white p-6 shadow-sm" id="messages">
-        <h2 className="mb-4 flex items-center gap-2 text-base font-semibold text-gray-900">
-          <History className="h-4 w-4" />
-          Recent messages sent
-        </h2>
-        {messages.length === 0 ? (
-          <p className="text-sm text-gray-400 italic">
-            You haven&apos;t contacted any representatives yet.
-          </p>
-        ) : (
-          <div className="space-y-3">
-            {messages.map((msg) => (
-              <div
-                key={msg.id}
-                className="rounded-lg border border-gray-100 bg-gray-50 p-4 text-sm"
-              >
-                <div className="mb-1 flex items-center justify-between gap-2 text-xs text-gray-400">
-                  <span>
-                    To:{' '}
-                    <span className="font-medium text-gray-700">{msg.representative.fullName}</span>
-                    {msg.representative.stateCode && ` (${msg.representative.stateCode})`}
-                  </span>
-                  <span>{new Date(msg.sentAt).toLocaleDateString()}</span>
+      <Card id="messages">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <History className="h-4 w-4" />
+            Recent messages sent
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {messages.length === 0 ? (
+            <p className="text-sm italic text-muted-foreground">
+              You haven&apos;t contacted any representatives yet.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {messages.map((msg) => (
+                <div
+                  key={msg.id}
+                  className="rounded-lg border border-border bg-muted/50 p-4 text-sm"
+                >
+                  <div className="mb-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                    <span>
+                      To:{' '}
+                      <span className="font-medium text-foreground">{msg.representative.fullName}</span>
+                      {msg.representative.stateCode && ` (${msg.representative.stateCode})`}
+                    </span>
+                    <span>{new Date(msg.sentAt).toLocaleDateString()}</span>
+                  </div>
+                  {msg.bill && (
+                    <p className="mb-1 text-xs text-muted-foreground">
+                      Re: {msg.bill.billNumber ? `${msg.bill.billNumber} — ` : ''}{msg.bill.title}
+                    </p>
+                  )}
+                  {msg.subject && (
+                    <p className="font-medium text-foreground">{msg.subject}</p>
+                  )}
+                  <p className="line-clamp-2 text-muted-foreground">{msg.body}</p>
                 </div>
-                {msg.bill && (
-                  <p className="mb-1 text-xs text-gray-500">
-                    Re: {msg.bill.billNumber ? `${msg.bill.billNumber} — ` : ''}{msg.bill.title}
-                  </p>
-                )}
-                {msg.subject && (
-                  <p className="font-medium text-gray-800">{msg.subject}</p>
-                )}
-                <p className="line-clamp-2 text-gray-600">{msg.body}</p>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }

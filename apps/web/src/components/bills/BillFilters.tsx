@@ -3,6 +3,17 @@
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Search, X } from 'lucide-react'
 import { useState, useEffect } from 'react'
+import { Input } from '@/components/ui/input'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { cn } from '@/lib/utils'
 
 const LEVELS = [
   { value: 'all', label: 'All Levels' },
@@ -35,10 +46,8 @@ export function BillFilters() {
   const router = useRouter()
   const params = useSearchParams()
 
-  // Local state for search input to avoid pushing on every keystroke
   const [searchInput, setSearchInput] = useState(params.get('search') ?? '')
 
-  // Keep local state in sync if URL changes (e.g., back/forward nav)
   useEffect(() => {
     setSearchInput(params.get('search') ?? '')
   }, [params])
@@ -93,20 +102,20 @@ export function BillFilters() {
     <div className="mb-6 space-y-3">
       {/* Search input */}
       <div className="relative">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-        <input
+        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+        <Input
           type="search"
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') commitSearch(searchInput) }}
           onBlur={() => commitSearch(searchInput)}
           placeholder="Search bills by keyword…"
-          className="w-full rounded-lg border border-gray-200 bg-white py-2.5 pl-10 pr-10 text-sm text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+          className="pl-9 pr-9"
         />
         {searchInput && (
           <button
             onClick={() => { setSearchInput(''); commitSearch('') }}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
             aria-label="Clear search"
           >
             <X className="h-4 w-4" />
@@ -116,57 +125,70 @@ export function BillFilters() {
 
       {/* Dropdown filters + clear */}
       <div className="flex flex-wrap items-center gap-2">
-        <select
-          className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+        <Select
           value={params.get('level') ?? 'all'}
-          onChange={(e) => setFilter('level', e.target.value)}
-          aria-label="Filter by level"
+          onValueChange={(v) => setFilter('level', v)}
         >
-          {LEVELS.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
-        </select>
+          <SelectTrigger className="w-36" aria-label="Filter by level">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {LEVELS.map((l) => <SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
 
-        <select
-          className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+        <Select
           value={params.get('chamber') ?? 'all'}
-          onChange={(e) => setFilter('chamber', e.target.value)}
-          aria-label="Filter by chamber"
+          onValueChange={(v) => setFilter('chamber', v)}
         >
-          {CHAMBERS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-        </select>
+          <SelectTrigger className="w-36" aria-label="Filter by chamber">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {CHAMBERS.map((c) => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
 
-        <select
-          className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+        <Select
           value={params.get('status') ?? 'all'}
-          onChange={(e) => setFilter('status', e.target.value)}
-          aria-label="Filter by status"
+          onValueChange={(v) => setFilter('status', v)}
         >
-          {STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-        </select>
+          <SelectTrigger className="w-40" aria-label="Filter by status">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {STATUSES.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
 
         {hasActiveFilters && (
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={clearAll}
-            className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-500 hover:bg-gray-50 hover:text-gray-700"
+            className="gap-1.5 text-slate-500 hover:text-slate-700"
           >
             <X className="h-3.5 w-3.5" />
             Clear all
-          </button>
+          </Button>
         )}
       </div>
 
       {/* Issue tag pills */}
       <div className="flex flex-wrap gap-1.5">
         {ISSUE_TAGS.map((tag) => (
-          <button
-            key={tag}
-            onClick={() => toggleTag(tag)}
-            className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${
-              activeTags.has(tag)
-                ? 'border-primary-300 bg-primary-50 text-primary-700'
-                : 'border-gray-200 text-gray-500 hover:border-primary-200 hover:bg-primary-50 hover:text-primary-600'
-            }`}
-          >
-            {tag}
+          <button key={tag} onClick={() => toggleTag(tag)} className="focus:outline-none">
+            <Badge
+              variant={activeTags.has(tag) ? 'default' : 'outline'}
+              className={cn(
+                'cursor-pointer text-xs transition-colors',
+                activeTags.has(tag)
+                  ? 'bg-navy-900 text-white hover:bg-navy-800 dark:bg-blue-600 dark:hover:bg-blue-500'
+                  : 'border-slate-300 text-slate-600 hover:border-navy-300 hover:bg-navy-50 hover:text-navy-700 dark:border-slate-600 dark:text-slate-400',
+              )}
+            >
+              {tag}
+            </Badge>
           </button>
         ))}
       </div>

@@ -26,7 +26,6 @@ export default function manifest(): MetadataRoute.Manifest {
         src: '/icons/icon-512.png',
         sizes: '512x512',
         type: 'image/png',
-        // @ts-expect-error — purpose is valid in the Web App Manifest spec
         purpose: 'maskable',
       },
     ],
@@ -34,7 +33,6 @@ export default function manifest(): MetadataRoute.Manifest {
       {
         src: '/screenshots/feed.png',
         sizes: '1280x720',
-        // @ts-expect-error — type is optional per spec
         type: 'image/png',
         label: 'Bill feed with community opinions',
       },

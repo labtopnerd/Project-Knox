@@ -32,14 +32,14 @@ export interface CensusGeocodeResponse {
     addressMatches: Array<{
       matchedAddress: string
       coordinates: { x: number; y: number }  // x = lng, y = lat
-      geographies?: {
-        '116th Congressional Districts'?: Array<{ BASENAME: string; GEOID: string; CD116FP: string }>
-        'Current Congressional Districts'?: Array<{ BASENAME: string; GEOID: string; CDFP: string }>
-        'States'?: Array<{ BASENAME: string; GEOID: string; STUSAB: string; STATE: string }>
-        'State Legislative Districts - Upper'?: Array<{ BASENAME: string; SLDUST: string }>
-        'State Legislative Districts - Lower'?: Array<{ BASENAME: string; SLDLST: string }>
-      }
+      geographies?: Record<string, Array<Record<string, string>>>
     }>
+  }
+}
+
+export interface CensusCoordinatesResponse {
+  result: {
+    geographies: Record<string, Array<Record<string, string>>>
   }
 }
 
@@ -55,6 +55,71 @@ const STATE_FIPS_TO_CODE: Record<string, string> = {
   '45': 'SC', '46': 'SD', '47': 'TN', '48': 'TX', '49': 'UT',
   '50': 'VT', '51': 'VA', '53': 'WA', '54': 'WV', '55': 'WI',
   '56': 'WY', '72': 'PR',
+}
+
+/**
+ * Extract district info from a Census geographies object.
+ * Layer names change each Congress — probe multiple known names.
+ */
+function extractDistrictsFromGeographies(
+  geo: Record<string, Array<Record<string, string>>>,
+): { stateCode: string; stateFips: string; congressionalDistrict: string; stateDistrict: string; stateDistrictLower: string } {
+  const stateInfo = geo['States']?.[0] ?? {}
+  const stateFips = stateInfo['STATE'] ?? ''
+  const stateCode = stateInfo['STUSAB'] ?? STATE_FIPS_TO_CODE[stateFips] ?? ''
+
+  // Congressional district — probe current and past layer names
+  const cdLayerNames = [
+    '119th Congressional Districts',
+    '118th Congressional Districts',
+    'Current Congressional Districts',
+    '116th Congressional Districts',
+  ]
+  let cdInfo: Record<string, string> | undefined
+  for (const name of cdLayerNames) {
+    if (geo[name]?.[0]) { cdInfo = geo[name]![0]; break }
+  }
+  const districtNum = cdInfo?.['CDFP'] ?? cdInfo?.['CD116FP'] ?? ''
+  const congressionalDistrict = districtNum ? String(parseInt(districtNum, 10)) : ''
+
+  // State legislative districts — probe current and past layer names
+  const upperLayerNames = ['2024 State Legislative Districts - Upper', 'State Legislative Districts - Upper']
+  const lowerLayerNames = ['2024 State Legislative Districts - Lower', 'State Legislative Districts - Lower']
+  let upperInfo: Record<string, string> | undefined
+  for (const name of upperLayerNames) {
+    if (geo[name]?.[0]) { upperInfo = geo[name]![0]; break }
+  }
+  let lowerInfo: Record<string, string> | undefined
+  for (const name of lowerLayerNames) {
+    if (geo[name]?.[0]) { lowerInfo = geo[name]![0]; break }
+  }
+  const stateDistrict = upperInfo?.['SLDUST'] ?? upperInfo?.['BASENAME'] ?? ''
+  const stateDistrictLower = lowerInfo?.['SLDLST'] ?? lowerInfo?.['BASENAME'] ?? ''
+
+  return { stateCode, stateFips, congressionalDistrict, stateDistrict, stateDistrictLower }
+}
+
+/**
+ * Look up Census geographies by coordinates. Used by geocodeZipCode.
+ */
+async function geocodeByCoordinates(
+  lat: number,
+  lng: number,
+): Promise<{ stateCode: string; stateFips: string; congressionalDistrict: string; stateDistrict: string; stateDistrictLower: string } | null> {
+  try {
+    const response = await axios.get<CensusCoordinatesResponse>(
+      `${BASE_URL}/geographies/coordinates`,
+      {
+        params: { x: lng, y: lat, benchmark: 'Public_AR_Current', vintage: 'Current_Current', layers: 'all', format: 'json' },
+        timeout: 10000,
+      },
+    )
+    const geo = response.data.result.geographies ?? {}
+    return extractDistrictsFromGeographies(geo)
+  } catch (err) {
+    console.error('[Census] Coordinates lookup error:', err)
+    return null
+  }
 }
 
 /**
@@ -82,35 +147,15 @@ export async function geocodeAddress(address: string): Promise<CensusGeocodeResu
     if (!matches || matches.length === 0) return null
 
     const match = matches[0]!
-    const geographies = match.geographies ?? {}
-
-    const stateInfo =
-      geographies['States']?.[0] ?? null
-    const stateFips = stateInfo?.STATE ?? ''
-    const stateCode = stateInfo?.STUSAB ?? STATE_FIPS_TO_CODE[stateFips] ?? ''
-
-    const cdInfo =
-      geographies['Current Congressional Districts']?.[0] ??
-      geographies['116th Congressional Districts']?.[0] ??
-      null
-
-    const districtNum = cdInfo?.CDFP ?? cdInfo?.CD116FP ?? ''
-    const congressionalDistrict = districtNum ? String(parseInt(districtNum, 10)) : ''
-
-    const upperDist = geographies['State Legislative Districts - Upper']?.[0]?.SLDUST ?? ''
-    const lowerDist = geographies['State Legislative Districts - Lower']?.[0]?.SLDLST ?? ''
+    const districts = extractDistrictsFromGeographies(match.geographies ?? {})
 
     const result: CensusGeocodeResult = {
       latitude: match.coordinates.y,
       longitude: match.coordinates.x,
-      stateCode,
-      stateFips,
+      ...districts,
       countyFips: '',
       tractCode: '',
       blockCode: '',
-      congressionalDistrict,
-      stateDistrict: upperDist,
-      stateDistrictLower: lowerDist,
       matchedAddress: match.matchedAddress,
     }
 
@@ -122,9 +167,18 @@ export async function geocodeAddress(address: string): Promise<CensusGeocodeResu
   }
 }
 
+interface ZippopotamPlace {
+  'place name': string
+  longitude: string
+  state: string
+  'state abbreviation': string
+  latitude: string
+}
+
 /**
- * Geocode using zip code only (less precise — gives state but not district).
- * Use this as a fallback when full address geocoding fails.
+ * Geocode using ZIP code only.
+ * Uses zippopotam.us (free, no key) to get the ZIP centroid lat/lng,
+ * then calls the Census coordinates endpoint to get the congressional district.
  */
 export async function geocodeZipCode(zipCode: string): Promise<Partial<CensusGeocodeResult> | null> {
   const cacheKey = `census:zip:${zipCode}`
@@ -132,31 +186,31 @@ export async function geocodeZipCode(zipCode: string): Promise<Partial<CensusGeo
   if (cached) return cached
 
   try {
-    const response = await axios.get<CensusGeocodeResponse>(`${BASE_URL}/locations/onelineaddress`, {
-      params: {
-        address: zipCode,
-        benchmark: 'Public_AR_Current',
-        vintage: 'Current_Current',
-        layers: 'all',
-        format: 'json',
-      },
-      timeout: 10000,
-    })
+    // Step 1: Resolve ZIP → lat/lng + state via zippopotam.us (free, no key required)
+    const zipResp = await axios.get<{ places: ZippopotamPlace[] }>(
+      `https://api.zippopotam.us/us/${zipCode}`,
+      { timeout: 8000 },
+    )
+    const place = zipResp.data.places[0]
+    if (!place) return null
 
-    const matches = response.data.result.addressMatches
-    if (!matches || matches.length === 0) return null
+    const lat = parseFloat(place.latitude)
+    const lng = parseFloat(place.longitude)
+    const stateCode = place['state abbreviation']
+    const matchedAddress = `${place['place name']}, ${stateCode} ${zipCode}`
 
-    const match = matches[0]!
-    const stateInfo = match.geographies?.['States']?.[0] ?? null
-    const stateFips = stateInfo?.STATE ?? ''
-    const stateCode = stateInfo?.STUSAB ?? STATE_FIPS_TO_CODE[stateFips] ?? ''
+    // Step 2: Get congressional district from Census by coordinates
+    const districts = await geocodeByCoordinates(lat, lng)
 
     const result: Partial<CensusGeocodeResult> = {
-      latitude: match.coordinates.y,
-      longitude: match.coordinates.x,
+      latitude: lat,
+      longitude: lng,
       stateCode,
-      stateFips,
-      matchedAddress: match.matchedAddress,
+      stateFips: districts?.stateFips ?? '',
+      congressionalDistrict: districts?.congressionalDistrict ?? '',
+      stateDistrict: districts?.stateDistrict ?? '',
+      stateDistrictLower: districts?.stateDistrictLower ?? '',
+      matchedAddress,
     }
 
     await cacheSet(cacheKey, result, TTL.CENSUS_GEOCODE)
