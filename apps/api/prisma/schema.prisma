@@ -6,8 +6,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // =============================================================================
@@ -185,6 +186,20 @@ model Bill {
   fullTextUrl    String?  // Full bill text URL
   rawData        Json?    // Full API response cached
   lastSyncedAt   DateTime?
+
+  // AI Enrichment (Groq / LLaMA 3.3 70B)
+  aiSummary      String?   @db.Text
+  keyProvisions  String[]
+  whoItAffects   String[]
+  proArguments   Json?     // [{title: string, description: string}]
+  conArguments   Json?     // [{title: string, description: string}]
+  aiEnrichedAt   DateTime?
+
+  // Legislative timeline (Congress.gov /actions endpoint)
+  actions        Json?     // [{date, text, type, actionCode?}]
+
+  // Related legislation (Congress.gov /relatedbills endpoint)
+  relatedBills   Json?     // [{title, billNumber, url, relationshipType}]
   // Relations
   sponsor        Representative? @relation("BillSponsor", fields: [sponsorId], references: [id])
   cosponsors     BillCosponsor[]

@@ -62,6 +62,23 @@ export interface CongressBillDetail extends CongressBill {
   cboCostEstimates: Array<{ description: string; pubDate: string; url: string }>
   policyArea?: { name: string }
   actions: { count: number; url: string }
+  relatedBills?: { count: number; url: string }
+}
+
+export interface CongressAction {
+  actionDate: string
+  text: string
+  type?: string
+  actionCode?: string
+}
+
+export interface CongressRelatedBill {
+  title: string
+  congress: number
+  type: string
+  number: string
+  url: string
+  relationshipDetails: Array<{ type: string; identifiedBy: string }>
 }
 
 export interface CongressBillSummariesResponse {
@@ -213,4 +230,33 @@ export async function getMemberSponsoredBills(bioguideId: string, offset: number
     limit: 20,
     offset,
   })
+}
+
+/**
+ * Fetch the legislative action history for a bill.
+ */
+export async function getBillActions(
+  congress: number,
+  type: string,
+  number: string,
+): Promise<CongressAction[]> {
+  const data = await congressRequest<{ actions: CongressAction[] }>(
+    `/bill/${congress}/${type.toLowerCase()}/${number}/actions`,
+    { limit: 50 },
+  )
+  return data.actions ?? []
+}
+
+/**
+ * Fetch related bills for a given bill.
+ */
+export async function getRelatedBills(
+  congress: number,
+  type: string,
+  number: string,
+): Promise<CongressRelatedBill[]> {
+  const data = await congressRequest<{ relatedBills: CongressRelatedBill[] }>(
+    `/bill/${congress}/${type.toLowerCase()}/${number}/relatedbills`,
+  )
+  return data.relatedBills ?? []
 }

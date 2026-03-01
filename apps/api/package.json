@@ -16,15 +16,16 @@
     "sync:bills": "tsx src/jobs/billSync.ts"
   },
   "dependencies": {
-    "@project-knox/types": "*",
     "@prisma/client": "^5.22.0",
+    "@project-knox/types": "*",
     "axios": "^1.7.9",
     "bcryptjs": "^2.4.3",
-    "expo-server-sdk": "^3.10.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
+    "expo-server-sdk": "^3.10.0",
     "express": "^4.21.2",
     "express-rate-limit": "^7.5.0",
+    "groq-sdk": "^0.37.0",
     "helmet": "^8.0.0",
     "ioredis": "^5.4.2",
     "jsonwebtoken": "^9.0.2",

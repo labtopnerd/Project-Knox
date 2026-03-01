@@ -7,8 +7,14 @@ import { VoteResultsBar } from '@/components/bills/VoteResultsBar'
 import { BillStatusBadge } from '@/components/bills/BillStatusBadge'
 import { BookmarkButton } from '@/components/bills/BookmarkButton'
 import { ShareButtons } from '@/components/bills/ShareButtons'
+import { BillAiSummary } from '@/components/bills/BillAiSummary'
+import { BillProCon } from '@/components/bills/BillProCon'
+import { BillTimeline } from '@/components/bills/BillTimeline'
+import { BipartisanMeter } from '@/components/bills/BipartisanMeter'
+import { RelatedBills } from '@/components/bills/RelatedBills'
 import { RepCard } from '@/components/representatives/RepCard'
 import { ContactForm } from '@/components/contact/ContactForm'
+import { CollapsibleCard } from '@/components/ui/collapsible-card'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
@@ -29,7 +35,7 @@ export default async function BillDetailPage({ params }: { params: Params }) {
   const { id } = await params
   const session = await auth()
 
-  const [bill, userVoteRow, bookmarkRow] = await Promise.all([
+  const [bill, userVoteRow, bookmarkRow, userReps] = await Promise.all([
     prisma.bill.findUnique({
       where: { id },
       include: {
@@ -50,6 +56,13 @@ export default async function BillDetailPage({ params }: { params: Params }) {
           select: { userId: true },
         })
       : null,
+    session?.user?.id
+      ? prisma.userRepresentative.findMany({
+          where: { userId: session.user.id },
+          include: { representative: true },
+          take: 6,
+        })
+      : [],
   ])
 
   if (!bill) notFound()
@@ -82,6 +95,16 @@ export default async function BillDetailPage({ params }: { params: Params }) {
   const sponsor = bill.sponsor as Representative | null
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
   const billShareUrl = `${appUrl}/bills/${bill.id}`
+
+  // Parse JSON fields
+  type Argument = { title: string; description: string }
+  type TimelineAction = { date: string; text: string; type?: string | null; actionCode?: string | null }
+  type RelatedBill = { title: string; billNumber: string; url: string; relationshipType: string }
+
+  const proArguments = Array.isArray(bill.proArguments) ? (bill.proArguments as unknown as Argument[]) : []
+  const conArguments = Array.isArray(bill.conArguments) ? (bill.conArguments as unknown as Argument[]) : []
+  const timelineActions = Array.isArray(bill.actions) ? (bill.actions as unknown as TimelineAction[]) : []
+  const relatedBillsList = Array.isArray(bill.relatedBills) ? (bill.relatedBills as unknown as RelatedBill[]) : []
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -161,17 +184,13 @@ export default async function BillDetailPage({ params }: { params: Params }) {
         </CardContent>
       </Card>
 
-      {/* Summary */}
-      {bill.summary && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Summary</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm leading-relaxed text-muted-foreground">{bill.summary}</p>
-          </CardContent>
-        </Card>
-      )}
+      {/* AI Summary (replaces plain Summary card) */}
+      <BillAiSummary
+        aiSummary={bill.aiSummary ?? null}
+        summary={bill.summary ?? null}
+        keyProvisions={bill.keyProvisions}
+        whoItAffects={bill.whoItAffects}
+      />
 
       {/* Full text link */}
       {bill.fullTextUrl && (
@@ -198,6 +217,12 @@ export default async function BillDetailPage({ params }: { params: Params }) {
           </CardContent>
         </Card>
       )}
+
+      {/* Pro / Con */}
+      <BillProCon proArguments={proArguments} conArguments={conArguments} />
+
+      {/* Legislative timeline */}
+      <BillTimeline actions={timelineActions} />
 
       {/* Community opinion */}
       <Card>
@@ -246,6 +271,17 @@ export default async function BillDetailPage({ params }: { params: Params }) {
           </CardHeader>
           <CardContent>
             <RepCard rep={sponsor} compact />
+            {/* Sponsor term / district info */}
+            {(sponsor.termStart || sponsor.district) && (
+              <div className="mt-3 flex flex-wrap gap-4 text-xs text-muted-foreground">
+                {sponsor.termStart && (
+                  <span>In office since {new Date(sponsor.termStart).getFullYear()}</span>
+                )}
+                {sponsor.district && (
+                  <span>District {sponsor.district}</span>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
@@ -261,6 +297,7 @@ export default async function BillDetailPage({ params }: { params: Params }) {
                 All support this bill
               </span>
             </div>
+            <BipartisanMeter cosponsors={bill.cosponsors} />
           </CardHeader>
           <CardContent>
             <div className="grid gap-3 sm:grid-cols-2">
@@ -272,20 +309,49 @@ export default async function BillDetailPage({ params }: { params: Params }) {
         </Card>
       )}
 
-      {/* Contact sponsor */}
-      {sponsor && session && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Contact {sponsor.fullName}</CardTitle>
-            <p className="text-sm text-muted-foreground">
-              Let the bill&apos;s sponsor know your position.
-            </p>
-          </CardHeader>
-          <CardContent>
-            <ContactForm rep={sponsor} billId={bill.id} billTitle={bill.title} />
-          </CardContent>
-        </Card>
-      )}
+      {/* Related bills */}
+      <RelatedBills relatedBills={relatedBillsList} />
+
+      {/* Contact — user's reps first, then sponsor */}
+      {session && (() => {
+        const myReps = (userReps ?? []).map((ur) => ur.representative as Representative)
+        // Deduplicate: don't show sponsor again if they're already in user's reps
+        const sponsorAlreadyListed = sponsor && myReps.some((r) => r.id === sponsor.id)
+        const showSponsorSeparately = sponsor && !sponsorAlreadyListed
+
+        if (!myReps.length && !showSponsorSeparately) return null
+
+        return (
+          <>
+            {myReps.map((rep) => {
+              const repTypeLabel =
+                rep.title ??
+                (rep.chamber === 'senate' ? 'Senator' :
+                 rep.chamber === 'house' ? 'Representative' :
+                 rep.chamber === 'state_senate' ? 'State Senator' :
+                 rep.chamber === 'state_house' ? 'State Representative' : 'Representative')
+              return (
+                <CollapsibleCard
+                  key={rep.id}
+                  title={`Contact your ${repTypeLabel}`}
+                  description={`Let ${rep.fullName} know your position on this bill.`}
+                >
+                  <ContactForm rep={rep} billId={bill.id} billTitle={bill.title} />
+                </CollapsibleCard>
+              )
+            })}
+
+            {showSponsorSeparately && (
+              <CollapsibleCard
+                title="Contact the bill's sponsor"
+                description={`Let ${sponsor.fullName} know your position.`}
+              >
+                <ContactForm rep={sponsor} billId={bill.id} billTitle={bill.title} />
+              </CollapsibleCard>
+            )}
+          </>
+        )
+      })()}
 
       {/* Share */}
       <Card>

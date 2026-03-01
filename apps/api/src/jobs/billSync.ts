@@ -10,10 +10,14 @@
  */
 
 import { prisma } from '../lib/prisma'
-import { getRecentBills } from '../services/congress/client'
+import { getRecentBills, getBillDetail, getBillSummaries, getBillActions, getRelatedBills } from '../services/congress/client'
 import { transformCongressBill } from '../services/congress/transformers'
 import { getBillsUpdatedSince } from '../services/openstates/client'
 import { transformOpenStatesBill } from '../services/openstates/transformers'
+import { enrichBill } from '../services/ai/groq'
+import type { Prisma } from '@prisma/client'
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 // US state codes for OpenStates sync
 const US_STATES = [
@@ -27,6 +31,7 @@ const US_STATES = [
 export interface SyncResult {
   federal: { synced: number; errors: number }
   state: { synced: number; errors: number; statesProcessed: number }
+  enriched: number
   duration: number
 }
 
@@ -54,23 +59,57 @@ export async function syncFederalBills(
 
       for (const bill of response.bills) {
         try {
-          const data = transformCongressBill(bill)
-          const { sponsorExternalId, ...billData } = data as typeof data & { sponsorExternalId?: string }
+          const billData = transformCongressBill(bill)
 
-          // Find sponsor if we have their external ID
+          // Fetch detail + summaries in parallel (responses are cached)
+          const [detailRes, summariesRes] = await Promise.allSettled([
+            getBillDetail(bill.congress, bill.type, bill.number),
+            getBillSummaries(bill.congress, bill.type, bill.number),
+          ])
+
+          const detail = detailRes.status === 'fulfilled' ? detailRes.value.bill : null
+          const summary = summariesRes.status === 'fulfilled'
+            ? (summariesRes.value.summaries?.[0]?.text ?? null)
+            : null
+
+          // Resolve or upsert the sponsor representative
           let sponsorId: string | undefined
-          if (sponsorExternalId) {
-            const rep = await prisma.representative.findUnique({
-              where: { externalId: sponsorExternalId },
+          if (detail?.sponsors?.[0]) {
+            const s = detail.sponsors[0]
+            const externalId = `congress:${s.bioguideId}`
+            const rep = await prisma.representative.upsert({
+              where: { externalId },
+              create: {
+                externalId,
+                source: 'congress',
+                fullName: s.fullName,
+                party: s.party ?? null,
+                chamber: bill.originChamber?.toLowerCase() === 'senate' ? 'senate' : 'house',
+                level: 'federal',
+                stateCode: s.state ?? null,
+                isActive: true,
+              },
+              update: {
+                fullName: s.fullName,
+                party: s.party ?? null,
+                stateCode: s.state ?? null,
+              },
               select: { id: true },
             })
-            sponsorId = rep?.id
+            sponsorId = rep.id
           }
+
+          // Issue tags from policyArea
+          const issueTags: string[] = detail?.policyArea?.name
+            ? [detail.policyArea.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')]
+            : billData.issueTags
 
           await prisma.bill.upsert({
             where: { externalId: billData.externalId },
             create: {
               ...billData,
+              issueTags,
+              ...(summary ? { summary } : {}),
               ...(sponsorId ? { sponsor: { connect: { id: sponsorId } } } : {}),
             },
             update: {
@@ -78,9 +117,42 @@ export async function syncFederalBills(
               status: billData.status,
               lastActionDate: billData.lastActionDate,
               lastActionText: billData.lastActionText,
+              issueTags,
+              ...(summary ? { summary } : {}),
+              ...(sponsorId ? { sponsor: { connect: { id: sponsorId } } } : {}),
               lastSyncedAt: new Date(),
             },
           })
+
+          // Fetch and store legislative actions + related bills
+          try {
+            const [actions, related] = await Promise.all([
+              getBillActions(bill.congress, bill.type, bill.number),
+              getRelatedBills(bill.congress, bill.type, bill.number),
+            ])
+            const mapped = actions.map((a) => ({
+              date: a.actionDate,
+              text: a.text,
+              type: a.type ?? null,
+              actionCode: a.actionCode ?? null,
+            }))
+            const mappedRelated = related.map((r) => ({
+              title: r.title,
+              billNumber: `${r.type} ${r.number}`,
+              url: r.url,
+              relationshipType: r.relationshipDetails?.[0]?.type ?? 'related',
+            }))
+            await prisma.bill.update({
+              where: { externalId: billData.externalId },
+              data: {
+                actions: mapped as Prisma.InputJsonValue,
+                relatedBills: mappedRelated as Prisma.InputJsonValue,
+              },
+            })
+          } catch (err) {
+            console.warn(`[BillSync] Could not fetch actions/relatedBills for ${bill.number}:`, err instanceof Error ? err.message : err)
+          }
+
           synced++
         } catch (err) {
           console.error(`[BillSync] Error upserting federal bill ${bill.number}:`, err)
@@ -187,7 +259,61 @@ export async function syncStateBills(
 }
 
 /**
- * Full sync job — run both federal and state syncs.
+ * Enrich up to 50 unenriched bills per run using Groq AI.
+ * Caller must ensure GROQ_API_KEY is set; if not, this is a no-op.
+ */
+export async function enrichUnenrichedBills(): Promise<number> {
+  if (!process.env.GROQ_API_KEY) {
+    console.log('[BillSync] GROQ_API_KEY not set — skipping AI enrichment')
+    return 0
+  }
+
+  const unenriched = await prisma.bill.findMany({
+    where: { aiEnrichedAt: null, summary: { not: null } },
+    take: 50,
+    include: { sponsor: { select: { fullName: true, party: true, stateCode: true } } },
+  })
+
+  console.log(`[BillSync] Enriching ${unenriched.length} unenriched bills via Groq`)
+  let enriched = 0
+
+  for (const bill of unenriched) {
+    const result = await enrichBill({
+      title: bill.title,
+      summary: bill.summary,
+      lastActionText: bill.lastActionText,
+      issueTags: bill.issueTags,
+      status: bill.status,
+      sponsorName: bill.sponsor?.fullName,
+      sponsorParty: bill.sponsor?.party ?? undefined,
+      sponsorState: bill.sponsor?.stateCode ?? undefined,
+    })
+
+    if (result) {
+      await prisma.bill.update({
+        where: { id: bill.id },
+        data: {
+          aiSummary: result.aiSummary,
+          keyProvisions: result.keyProvisions,
+          whoItAffects: result.whoItAffects,
+          proArguments: result.proArguments as Prisma.InputJsonValue,
+          conArguments: result.conArguments as Prisma.InputJsonValue,
+          aiEnrichedAt: new Date(),
+        },
+      })
+      enriched++
+    }
+
+    // Stay under 30 req/min limit
+    await sleep(2100)
+  }
+
+  console.log(`[BillSync] AI enrichment complete: ${enriched}/${unenriched.length} enriched`)
+  return enriched
+}
+
+/**
+ * Full sync job — run both federal and state syncs, then enrich unenriched bills.
  */
 export async function runFullSync(): Promise<SyncResult> {
   const start = Date.now()
@@ -198,10 +324,12 @@ export async function runFullSync(): Promise<SyncResult> {
     syncStateBills(1),
   ])
 
+  const enriched = await enrichUnenrichedBills()
+
   const duration = Date.now() - start
   console.log(`[BillSync] === Full sync complete in ${duration}ms ===`)
 
-  return { federal, state, duration }
+  return { federal, state, enriched, duration }
 }
 
 // Allow running directly: tsx src/jobs/billSync.ts

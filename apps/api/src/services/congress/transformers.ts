@@ -16,6 +16,28 @@ const BILL_TYPE_MAP: Record<string, string> = {
   sres: 'S.Res.',
 }
 
+const CONGRESS_GOV_TYPE_MAP: Record<string, string> = {
+  hr: 'house-bill',
+  s: 'senate-bill',
+  hjres: 'house-joint-resolution',
+  sjres: 'senate-joint-resolution',
+  hconres: 'house-concurrent-resolution',
+  sconres: 'senate-concurrent-resolution',
+  hres: 'house-resolution',
+  sres: 'senate-resolution',
+}
+
+function ordinal(n: number): string {
+  const s = ['th', 'st', 'nd', 'rd']
+  const v = n % 100
+  return n + (s[(v - 20) % 10] ?? s[v] ?? s[0])
+}
+
+function buildCongressGovUrl(congress: number, type: string, number: string): string {
+  const typeSlug = CONGRESS_GOV_TYPE_MAP[type.toLowerCase()] ?? type.toLowerCase()
+  return `https://www.congress.gov/bill/${ordinal(congress)}-congress/${typeSlug}/${number}`
+}
+
 function formatBillNumber(type: string, number: string): string {
   const prefix = BILL_TYPE_MAP[type.toLowerCase()] ?? type.toUpperCase()
   return `${prefix} ${number}`
@@ -61,7 +83,7 @@ export function transformCongressBill(
     introducedDate: bill.introducedDate ? new Date(bill.introducedDate) : null,
     lastActionDate: bill.latestAction.actionDate ? new Date(bill.latestAction.actionDate) : null,
     lastActionText: bill.latestAction.text,
-    url: bill.url,
+    url: buildCongressGovUrl(bill.congress, bill.type, bill.number),
     issueTags: [],
     lastSyncedAt: new Date(),
     rawData: bill as unknown as Prisma.InputJsonValue,
