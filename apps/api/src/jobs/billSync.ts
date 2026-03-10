@@ -2,16 +2,18 @@
  * Bill Sync Job — runs every 6 hours via node-cron or Vercel Cron
  *
  * Fetches new and updated bills from:
- * 1. Congress.gov API (federal bills)
+ * 1. LegiScan API (federal bills)
  * 2. OpenStates API v3 (state bills — all 50 states)
  *
- * Uses incremental sync: only fetches bills updated since the last sync timestamp.
+ * Uses change_hash for incremental sync: skips bills whose hash hasn't changed.
  * Upserts into the database using externalId as the unique key.
  */
 
 import { prisma } from '../lib/prisma'
-import { getRecentBills, getBillDetail, getBillSummaries, getBillActions, getRelatedBills } from '../services/congress/client'
-import { transformCongressBill } from '../services/congress/transformers'
+import { getUSSessionId, getMasterList, getBill } from '../services/legiscan/client'
+import { transformLegiScanBill, parseStateFromDistrict, parseDistrictNumber, normalizeParty } from '../services/legiscan/transformers'
+import { syncRollCallsForBill } from '../services/legiscan/syncUtils'
+import { cacheGet, cacheSet, TTL } from '../lib/redis'
 import { getBillsUpdatedSince } from '../services/openstates/client'
 import { transformOpenStatesBill } from '../services/openstates/transformers'
 import { enrichBill } from '../services/ai/groq'
@@ -29,145 +31,168 @@ const US_STATES = [
 ]
 
 export interface SyncResult {
-  federal: { synced: number; errors: number }
+  federal: { synced: number; skipped: number; errors: number }
   state: { synced: number; errors: number; statesProcessed: number }
   enriched: number
   duration: number
 }
 
 /**
- * Sync federal bills from Congress.gov
+ * Sync federal bills from LegiScan using change_hash to minimize API calls.
  */
 export async function syncFederalBills(
   congress: number = 119,
-  limitPages: number = 5,
-): Promise<{ synced: number; errors: number }> {
+): Promise<{ synced: number; skipped: number; errors: number }> {
   let synced = 0
+  let skipped = 0
   let errors = 0
 
-  console.log(`[BillSync] Starting federal bill sync for Congress #${congress}`)
+  console.log(`[BillSync] Starting LegiScan federal bill sync for Congress #${congress}`)
 
-  for (let page = 0; page < limitPages; page++) {
-    try {
-      const offset = page * 20
-      const response = await getRecentBills(congress, offset, 20)
-
-      if (!response.bills || response.bills.length === 0) {
-        console.log(`[BillSync] No more federal bills at offset ${offset}`)
-        break
-      }
-
-      for (const bill of response.bills) {
-        try {
-          const billData = transformCongressBill(bill)
-
-          // Fetch detail + summaries in parallel (responses are cached)
-          const [detailRes, summariesRes] = await Promise.allSettled([
-            getBillDetail(bill.congress, bill.type, bill.number),
-            getBillSummaries(bill.congress, bill.type, bill.number),
-          ])
-
-          const detail = detailRes.status === 'fulfilled' ? detailRes.value.bill : null
-          const summary = summariesRes.status === 'fulfilled'
-            ? (summariesRes.value.summaries?.[0]?.text ?? null)
-            : null
-
-          // Resolve or upsert the sponsor representative
-          let sponsorId: string | undefined
-          if (detail?.sponsors?.[0]) {
-            const s = detail.sponsors[0]
-            const externalId = `congress:${s.bioguideId}`
-            const rep = await prisma.representative.upsert({
-              where: { externalId },
-              create: {
-                externalId,
-                source: 'congress',
-                fullName: s.fullName,
-                party: s.party ?? null,
-                chamber: bill.originChamber?.toLowerCase() === 'senate' ? 'senate' : 'house',
-                level: 'federal',
-                stateCode: s.state ?? null,
-                isActive: true,
-              },
-              update: {
-                fullName: s.fullName,
-                party: s.party ?? null,
-                stateCode: s.state ?? null,
-              },
-              select: { id: true },
-            })
-            sponsorId = rep.id
-          }
-
-          // Issue tags from policyArea
-          const issueTags: string[] = detail?.policyArea?.name
-            ? [detail.policyArea.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')]
-            : billData.issueTags
-
-          await prisma.bill.upsert({
-            where: { externalId: billData.externalId },
-            create: {
-              ...billData,
-              issueTags,
-              ...(summary ? { summary } : {}),
-              ...(sponsorId ? { sponsor: { connect: { id: sponsorId } } } : {}),
-            },
-            update: {
-              title: billData.title,
-              status: billData.status,
-              lastActionDate: billData.lastActionDate,
-              lastActionText: billData.lastActionText,
-              issueTags,
-              ...(summary ? { summary } : {}),
-              ...(sponsorId ? { sponsor: { connect: { id: sponsorId } } } : {}),
-              lastSyncedAt: new Date(),
-            },
-          })
-
-          // Fetch and store legislative actions + related bills
-          try {
-            const [actions, related] = await Promise.all([
-              getBillActions(bill.congress, bill.type, bill.number),
-              getRelatedBills(bill.congress, bill.type, bill.number),
-            ])
-            const mapped = actions.map((a) => ({
-              date: a.actionDate,
-              text: a.text,
-              type: a.type ?? null,
-              actionCode: a.actionCode ?? null,
-            }))
-            const mappedRelated = related.map((r) => ({
-              title: r.title,
-              billNumber: `${r.type} ${r.number}`,
-              url: r.url,
-              relationshipType: r.relationshipDetails?.[0]?.type ?? 'related',
-            }))
-            await prisma.bill.update({
-              where: { externalId: billData.externalId },
-              data: {
-                actions: mapped as Prisma.InputJsonValue,
-                relatedBills: mappedRelated as Prisma.InputJsonValue,
-              },
-            })
-          } catch (err) {
-            console.warn(`[BillSync] Could not fetch actions/relatedBills for ${bill.number}:`, err instanceof Error ? err.message : err)
-          }
-
-          synced++
-        } catch (err) {
-          console.error(`[BillSync] Error upserting federal bill ${bill.number}:`, err)
-          errors++
-        }
-      }
-    } catch (err) {
-      console.error(`[BillSync] Error fetching federal bills page ${page}:`, err)
-      errors++
-      break
-    }
+  const sessionId = await getUSSessionId(congress)
+  if (!sessionId) {
+    console.warn(`[BillSync] No LegiScan session found for Congress #${congress} — skipping federal sync`)
+    return { synced, skipped, errors }
   }
 
-  console.log(`[BillSync] Federal sync complete: ${synced} synced, ${errors} errors`)
-  return { synced, errors }
+  const masterlist = await getMasterList(sessionId)
+  if (!masterlist) {
+    console.warn('[BillSync] Could not fetch LegiScan masterlist — skipping federal sync')
+    return { synced, skipped, errors }
+  }
+
+  const entries = Object.values(masterlist)
+  console.log(`[BillSync] Processing ${entries.length} bills from LegiScan masterlist`)
+
+  for (const masterBill of entries) {
+    try {
+      // Check if bill has changed since last sync
+      const hashKey = `legiscan:hash:${masterBill.bill_id}`
+      const storedHash = await cacheGet<string>(hashKey)
+      if (storedHash === masterBill.change_hash) {
+        skipped++
+        continue
+      }
+
+      const bill = await getBill(masterBill.bill_id)
+      if (!bill) {
+        errors++
+        continue
+      }
+
+      const result = transformLegiScanBill(bill, congress)
+      if (!result) {
+        errors++
+        continue
+      }
+
+      const { primarySponsorPeopleId, cosponsorPeopleIds, ...billData } = result
+
+      // Upsert primary sponsor
+      let sponsorId: string | undefined
+      if (primarySponsorPeopleId != null) {
+        const sponsorExternalId = `legiscan:${primarySponsorPeopleId}`
+        const sponsor = bill.sponsors.find((s) => s.people_id === primarySponsorPeopleId)
+        if (sponsor) {
+          const sponsorStateCode = sponsor.district ? parseStateFromDistrict(sponsor.district) || null : null
+          const sponsorDistrict = sponsor.district ? parseDistrictNumber(sponsor.district) : null
+          const rep = await prisma.representative.upsert({
+            where: { externalId: sponsorExternalId },
+            create: {
+              externalId: sponsorExternalId,
+              source: 'congress',
+              fullName: sponsor.name,
+              party: sponsor.party ? normalizeParty(sponsor.party) : null,
+              chamber: billData.chamber ?? 'house',
+              level: 'federal',
+              stateCode: sponsorStateCode,
+              district: sponsorDistrict,
+              isActive: true,
+              lastSyncedAt: new Date(),
+            },
+            update: {
+              fullName: sponsor.name,
+              party: sponsor.party ? normalizeParty(sponsor.party) : null,
+              stateCode: sponsorStateCode,
+              district: sponsorDistrict,
+            },
+            select: { id: true },
+          })
+          sponsorId = rep.id
+        }
+      }
+
+      // Upsert bill
+      await prisma.bill.upsert({
+        where: { externalId: billData.externalId },
+        create: {
+          ...billData,
+          ...(sponsorId ? { sponsor: { connect: { id: sponsorId } } } : {}),
+        },
+        update: {
+          title: billData.title,
+          status: billData.status,
+          lastActionDate: billData.lastActionDate,
+          lastActionText: billData.lastActionText,
+          fullTextUrl: billData.fullTextUrl,
+          actions: billData.actions,
+          summary: billData.summary ?? undefined,
+          rawData: billData.rawData,
+          ...(sponsorId ? { sponsor: { connect: { id: sponsorId } } } : {}),
+          lastSyncedAt: new Date(),
+        },
+      })
+
+      // Upsert cosponsor links (only for reps already in DB)
+      for (const peopleId of cosponsorPeopleIds) {
+        const cosponsorExternalId = `legiscan:${peopleId}`
+        const cosponsorRep = await prisma.representative.findUnique({
+          where: { externalId: cosponsorExternalId },
+          select: { id: true },
+        })
+        if (cosponsorRep) {
+          const dbBill = await prisma.bill.findUnique({
+            where: { externalId: billData.externalId },
+            select: { id: true },
+          })
+          if (dbBill) {
+            await prisma.billCosponsor.upsert({
+              where: { billId_representativeId: { billId: dbBill.id, representativeId: cosponsorRep.id } },
+              create: { billId: dbBill.id, representativeId: cosponsorRep.id, joinedAt: null },
+              update: {},
+            })
+          }
+        }
+      }
+
+      // Sync roll call votes for this bill
+      if (bill.votes?.length) {
+        const dbBill = await prisma.bill.findUnique({
+          where: { externalId: billData.externalId },
+          select: { id: true },
+        })
+        if (dbBill) {
+          const sessionMeta = bill.session
+            ? { sessionId: bill.session.session_id, yearStart: bill.session.year_start }
+            : undefined
+          await syncRollCallsForBill(dbBill.id, bill.votes, sessionMeta)
+        }
+      }
+
+      // Cache the change_hash so we skip this bill on the next run if unchanged
+      await cacheSet(hashKey, masterBill.change_hash, TTL.LEGISCAN_MASTER)
+
+      synced++
+    } catch (err) {
+      console.error(`[BillSync] Error upserting LegiScan bill ${masterBill.number}:`, err)
+      errors++
+    }
+
+    await sleep(100)
+  }
+
+  console.log(`[BillSync] Federal sync complete: ${synced} synced, ${skipped} skipped, ${errors} errors`)
+  return { synced, skipped, errors }
 }
 
 /**
@@ -269,7 +294,7 @@ export async function enrichUnenrichedBills(): Promise<number> {
   }
 
   const unenriched = await prisma.bill.findMany({
-    where: { aiEnrichedAt: null, summary: { not: null } },
+    where: { aiEnrichedAt: null },
     take: 50,
     include: { sponsor: { select: { fullName: true, party: true, stateCode: true } } },
   })
@@ -320,7 +345,7 @@ export async function runFullSync(): Promise<SyncResult> {
   console.log('[BillSync] === Starting full bill sync ===')
 
   const [federal, state] = await Promise.all([
-    syncFederalBills(119, 5),
+    syncFederalBills(119),
     syncStateBills(1),
   ])
 
@@ -330,6 +355,42 @@ export async function runFullSync(): Promise<SyncResult> {
   console.log(`[BillSync] === Full sync complete in ${duration}ms ===`)
 
   return { federal, state, enriched, duration }
+}
+
+/**
+ * Backfill roll calls for bills already in the DB that have vote summaries
+ * (stored in rawData) but no RollCall rows yet.
+ *
+ * Reads rawData.votes[] from every federal LegiScan bill, then calls
+ * syncRollCallsForBill for each one that has unprocessed roll calls.
+ * The `legiscan:rc:done:` guard prevents re-fetching already-processed ones.
+ */
+export async function backfillRollCalls(limit = 50): Promise<{ processed: number; rollCallsAdded: number }> {
+  console.log(`[BillSync] Starting roll call backfill (limit=${limit})`)
+
+  const bills = await prisma.bill.findMany({
+    where: { source: 'legiscan' },
+    select: { id: true, rawData: true },
+    take: limit,
+  })
+
+  let processed = 0
+  let rollCallsBefore = await prisma.rollCall.count()
+
+  for (const bill of bills) {
+    const raw = bill.rawData as Record<string, unknown> | null
+    const votes = (raw?.votes ?? []) as Array<{ roll_call_id: number; date: string; desc: string; yea: number; nay: number; nv: number; absent: number; total: number; passed: number; chamber: string; chamber_id: number }>
+    if (!votes.length) continue
+
+    await syncRollCallsForBill(bill.id, votes)
+    processed++
+  }
+
+  const rollCallsAfter = await prisma.rollCall.count()
+  const added = rollCallsAfter - rollCallsBefore
+
+  console.log(`[BillSync] Roll call backfill complete: ${processed} bills processed, ${added} roll calls added`)
+  return { processed, rollCallsAdded: added }
 }
 
 // Allow running directly: tsx src/jobs/billSync.ts

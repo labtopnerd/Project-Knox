@@ -8,6 +8,7 @@ import { BillStatusBadge } from './BillStatusBadge'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card'
 import type { BillWithUserVote } from '@project-knox/types'
+import { stripHtml } from '@/lib/utils'
 
 interface BillCardProps {
   bill: BillWithUserVote
@@ -47,7 +48,7 @@ export function BillCard({ bill, showVoting = true }: BillCardProps) {
       <CardContent className="pb-3 pt-0">
         {/* Summary */}
         {bill.summary && (
-          <p className="mb-4 text-sm text-slate-600 line-clamp-3 dark:text-slate-400">{bill.summary}</p>
+          <p className="mb-4 text-sm text-slate-600 line-clamp-3 dark:text-slate-400">{stripHtml(bill.summary)}</p>
         )}
 
         {/* Meta */}

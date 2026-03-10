@@ -9,12 +9,13 @@ import type { Metadata } from 'next'
 
 export const dynamic = 'force-dynamic'
 
-type Params = { repId: string }
-type SearchParams = { billId?: string }
+type Params = Promise<{ repId: string }>
+type SearchParams = Promise<{ billId?: string }>
 
 export async function generateMetadata({ params }: { params: Params }): Promise<Metadata> {
+  const { repId } = await params
   const rep = await prisma.representative.findUnique({
-    where: { id: params.repId },
+    where: { id: repId },
     select: { fullName: true },
   })
   return { title: rep ? `Contact ${rep.fullName}` : 'Contact Representative' }
@@ -27,14 +28,16 @@ export default async function ContactPage({
   params: Params
   searchParams: SearchParams
 }) {
+  const { repId } = await params
+  const { billId } = await searchParams
   const session = await auth()
   if (!session?.user?.id) redirect('/login')
 
   const [rep, bill] = await Promise.all([
-    prisma.representative.findUnique({ where: { id: params.repId } }),
-    searchParams.billId
+    prisma.representative.findUnique({ where: { id: repId } }),
+    billId
       ? prisma.bill.findUnique({
-          where: { id: searchParams.billId },
+          where: { id: billId },
           select: { id: true, title: true, billNumber: true },
         })
       : null,

@@ -24,9 +24,16 @@ export default async function RepresentativesPage() {
 
   const hasLocation = userReps.length > 0
 
+  const LEVEL_TO_SECTION: Record<string, string> = {
+    federal: 'Federal',
+    state: 'State',
+    local: 'Local',
+  }
+  const SECTION_ORDER = ['Federal', 'State', 'Local']
+
   const grouped: Record<string, typeof userReps> = {}
   for (const ur of userReps) {
-    const key = ur.representative.level === 'federal' ? 'Federal' : 'State & Local'
+    const key = LEVEL_TO_SECTION[ur.representative.level] ?? 'Local'
     if (!grouped[key]) grouped[key] = []
     grouped[key].push(ur)
   }
@@ -44,13 +51,13 @@ export default async function RepresentativesPage() {
 
       {hasLocation && (
         <div className="space-y-8">
-          {Object.entries(grouped).map(([groupName, reps]) => (
+          {SECTION_ORDER.filter((k) => grouped[k]).map((groupName) => (
             <section key={groupName}>
               <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-gray-400">
                 {groupName}
               </h2>
               <div className="space-y-4">
-                {reps.map((ur) => (
+                {(grouped[groupName] ?? []).map((ur) => (
                   <RepCard
                     key={ur.representativeId}
                     rep={ur.representative as Representative}

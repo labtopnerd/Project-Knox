@@ -146,7 +146,7 @@ export async function getBillsUpdatedSince(jurisdiction: string, since: Date): P
       jurisdiction,
       updatedSince: since.toISOString(),
       page,
-      perPage: 20,
+      perPage: 100,
       include: ['sponsorships', 'abstracts', 'actions'],
     })
     allBills.push(...response.results)

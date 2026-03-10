@@ -5,11 +5,28 @@
 import type { Prisma } from '@prisma/client'
 import type { OpenStatesBill, OpenStatesPerson } from './client'
 
-function mapOpenStatesChamber(classification: string): string {
+function mapOpenStatesChamber(classification: string, isFederal: boolean): string {
   const c = classification.toLowerCase()
-  if (c.includes('upper')) return 'state_senate'
-  if (c.includes('lower')) return 'state_house'
-  return 'state_house'
+  if (c.includes('upper')) return isFederal ? 'senate' : 'state_senate'
+  if (c.includes('lower')) return isFederal ? 'house' : 'state_house'
+  return isFederal ? 'house' : 'state_house'
+}
+
+function isFederalJurisdiction(jurisdictionId: string): boolean {
+  // Federal: "ocd-jurisdiction/country:us/government"
+  // State:   "ocd-jurisdiction/country:us/state:ca/government"
+  return !jurisdictionId.includes('/state:')
+}
+
+function isLocalJurisdiction(jurisdictionId: string): boolean {
+  // Local: "ocd-jurisdiction/country:us/state:mn/place:duluth/government"
+  //        "ocd-jurisdiction/country:us/state:mn/county:hennepin/government"
+  return (
+    jurisdictionId.includes('/place:') ||
+    jurisdictionId.includes('/county:') ||
+    jurisdictionId.includes('/district:') ||
+    jurisdictionId.includes('/school_district:')
+  )
 }
 
 function mapOpenStatesStatus(bill: OpenStatesBill): string {
@@ -42,7 +59,7 @@ export function transformOpenStatesBill(
   bill: OpenStatesBill,
 ): Omit<Prisma.BillCreateInput, 'sponsor'> & { sponsorPersonId?: string } {
   const stateCode = extractStateCode(bill.from_organization.id)
-  const chamber = mapOpenStatesChamber(bill.from_organization.classification)
+  const chamber = mapOpenStatesChamber(bill.from_organization.classification, false)
   const status = mapOpenStatesStatus(bill)
 
   const primarySponsor = bill.sponsorships?.find((s) => s.primary)
@@ -82,8 +99,15 @@ export function transformOpenStatesPerson(
   person: OpenStatesPerson,
 ): Prisma.RepresentativeCreateInput {
   const role = person.current_role
-  const stateCode = extractStateCode(person.jurisdiction.id)
-  const chamber = role ? mapOpenStatesChamber(role.org_classification) : 'state_house'
+  const isFederal = isFederalJurisdiction(person.jurisdiction.id)
+  const isLocal = !isFederal && isLocalJurisdiction(person.jurisdiction.id)
+  const level = isFederal ? 'federal' : isLocal ? 'local' : 'state'
+  const stateCode = isFederal ? null : extractStateCode(person.jurisdiction.id)
+  const chamber = isLocal
+    ? 'local'
+    : role
+      ? mapOpenStatesChamber(role.org_classification, isFederal)
+      : 'state_house'
   const websiteLink = person.links.find((l) => l.note?.toLowerCase().includes('website'))
   const twitterLink = person.links.find((l) => l.note?.toLowerCase().includes('twitter'))
 
@@ -95,7 +119,7 @@ export function transformOpenStatesPerson(
     fullName: person.name,
     party: partyNormalized,
     chamber,
-    level: 'state',
+    level,
     stateCode: stateCode || null,
     district: role?.district ?? null,
     title: role?.title ?? null,

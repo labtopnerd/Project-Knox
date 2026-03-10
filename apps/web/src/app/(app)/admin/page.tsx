@@ -19,6 +19,33 @@ const ADMIN_EMAILS = (process.env.ADMIN_EMAILS ?? '')
   .map((e) => e.trim())
   .filter(Boolean)
 
+type SyncLog = {
+  id: string
+  job: string
+  status: string
+  startedAt: string
+  completedAt: string | null
+  durationMs: number | null
+  result: Record<string, number> | null
+  error: string | null
+}
+
+async function getSyncLogs(): Promise<SyncLog[]> {
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
+  const cronSecret = process.env.CRON_SECRET ?? ''
+  try {
+    const res = await fetch(`${apiUrl}/api/sync/logs`, {
+      headers: { Authorization: `Bearer ${cronSecret}` },
+      cache: 'no-store',
+    })
+    if (!res.ok) return []
+    const data = await res.json()
+    return data.logs ?? []
+  } catch {
+    return []
+  }
+}
+
 async function getStats() {
   const now = new Date()
   const last24h = new Date(now.getTime() - 24 * 60 * 60 * 1000)
@@ -61,6 +88,20 @@ async function getStats() {
   }
 }
 
+function SyncStatusBadge({ status }: { status: string }) {
+  const styles =
+    status === 'completed'
+      ? 'bg-green-100 text-green-700'
+      : status === 'running'
+        ? 'bg-yellow-100 text-yellow-700'
+        : 'bg-red-100 text-red-700'
+  return (
+    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold ${styles}`}>
+      {status}
+    </span>
+  )
+}
+
 function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
     <div className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
@@ -80,7 +121,7 @@ export default async function AdminPage() {
     redirect('/feed')
   }
 
-  const stats = await getStats()
+  const [stats, syncLogs] = await Promise.all([getStats(), getSyncLogs()])
 
   const lastSyncDisplay = stats.sync.lastSyncedAt
     ? new Intl.DateTimeFormat('en-US', {
@@ -179,6 +220,70 @@ export default async function AdminPage() {
           >
             ← Back to feed
           </Link>
+        </div>
+      </section>
+
+      {/* Sync history */}
+      <section className="mb-8">
+        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-gray-500">Sync history</h2>
+        <div className="overflow-x-auto rounded-xl border border-gray-100 bg-white shadow-sm">
+          {syncLogs.length === 0 ? (
+            <p className="p-5 text-sm text-gray-400">No sync logs found.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="border-b border-gray-100 bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                <tr>
+                  <th className="px-4 py-3 text-left">Job</th>
+                  <th className="px-4 py-3 text-left">Status</th>
+                  <th className="px-4 py-3 text-left">Started</th>
+                  <th className="px-4 py-3 text-right">Duration</th>
+                  <th className="px-4 py-3 text-right">Synced</th>
+                  <th className="px-4 py-3 text-right">Skipped</th>
+                  <th className="px-4 py-3 text-right">Errors</th>
+                  <th className="px-4 py-3 text-left">Error</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {syncLogs.map((log) => {
+                  const synced = log.result
+                    ? (log.result.federalSynced ?? 0) + (log.result.stateSynced ?? 0) + (log.result.synced ?? 0)
+                    : null
+                  const skipped = log.result?.federalSkipped ?? null
+                  const errors = log.result
+                    ? (log.result.federalErrors ?? 0) + (log.result.stateErrors ?? 0)
+                    : null
+                  return (
+                    <tr key={log.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 font-mono text-xs text-gray-700">{log.job}</td>
+                      <td className="px-4 py-3">
+                        <SyncStatusBadge status={log.status} />
+                      </td>
+                      <td className="px-4 py-3 text-gray-600">
+                        {new Intl.DateTimeFormat('en-US', {
+                          month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+                        }).format(new Date(log.startedAt))}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-gray-600">
+                        {log.durationMs != null ? `${(log.durationMs / 1000).toFixed(1)}s` : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-gray-700">
+                        {synced != null ? synced.toLocaleString() : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-gray-500">
+                        {skipped != null ? skipped.toLocaleString() : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-gray-500">
+                        {errors != null ? errors.toLocaleString() : '—'}
+                      </td>
+                      <td className="max-w-xs truncate px-4 py-3 text-xs text-red-600">
+                        {log.error ?? ''}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
         </div>
       </section>
     </div>

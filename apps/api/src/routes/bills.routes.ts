@@ -12,6 +12,8 @@ import { z } from 'zod'
 import { prisma } from '../lib/prisma'
 import { requireAuth, optionalAuth, type AuthRequest } from '../middleware/auth.middleware'
 import { cacheDelete } from '../lib/redis'
+import { enrichBill } from '../services/ai/groq'
+import type { Prisma } from '@prisma/client'
 
 export const billsRouter = Router()
 
@@ -373,6 +375,46 @@ billsRouter.get('/bookmarks/me', requireAuth, async (req: AuthRequest, res: Resp
     limit: limitNum,
     hasMore: (pageNum - 1) * limitNum + limitNum < total,
   })
+})
+
+// ─── POST /api/bills/:id/enrich ───────────────────────────────────────────────
+// On-demand AI enrichment for a single bill. No-ops if already enriched.
+
+billsRouter.post('/:id/enrich', requireAuth, async (req: Request, res: Response): Promise<void> => {
+  const bill = await prisma.bill.findUnique({
+    where: { id: req.params.id },
+    include: { sponsor: { select: { fullName: true, party: true, stateCode: true } } },
+  })
+
+  if (!bill) { res.status(404).json({ error: 'Not Found' }); return }
+  if (bill.aiEnrichedAt) { res.json({ already: true }); return }
+
+  const result = await enrichBill({
+    title: bill.title,
+    summary: bill.summary,
+    lastActionText: bill.lastActionText,
+    issueTags: bill.issueTags,
+    status: bill.status,
+    sponsorName: bill.sponsor?.fullName,
+    sponsorParty: bill.sponsor?.party ?? undefined,
+    sponsorState: bill.sponsor?.stateCode ?? undefined,
+  })
+
+  if (!result) { res.status(500).json({ error: 'Enrichment failed' }); return }
+
+  await prisma.bill.update({
+    where: { id: bill.id },
+    data: {
+      aiSummary: result.aiSummary,
+      keyProvisions: result.keyProvisions,
+      whoItAffects: result.whoItAffects,
+      proArguments: result.proArguments as Prisma.InputJsonValue,
+      conArguments: result.conArguments as Prisma.InputJsonValue,
+      aiEnrichedAt: new Date(),
+    },
+  })
+
+  res.json({ enriched: true })
 })
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

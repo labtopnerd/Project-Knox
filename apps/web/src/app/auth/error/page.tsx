@@ -13,12 +13,13 @@ const ERROR_MESSAGES: Record<string, string> = {
   Default: 'An unexpected error occurred during sign-in.',
 }
 
-export default function AuthErrorPage({
+export default async function AuthErrorPage({
   searchParams,
 }: {
-  searchParams: { error?: string }
+  searchParams: Promise<{ error?: string }>
 }) {
-  const message = ERROR_MESSAGES[searchParams.error ?? ''] ?? ERROR_MESSAGES.Default
+  const { error } = await searchParams
+  const message = ERROR_MESSAGES[error ?? ''] ?? ERROR_MESSAGES.Default
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">

@@ -1,6 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { CheckCircle2, Sparkles } from 'lucide-react'
+import { stripHtml } from '@/lib/utils'
 
 interface Props {
   aiSummary: string | null
@@ -10,8 +11,9 @@ interface Props {
 }
 
 export function BillAiSummary({ aiSummary, summary, keyProvisions = [], whoItAffects = [] }: Props) {
-  const displaySummary = aiSummary ?? summary
-  if (!displaySummary) return null
+  const rawSummary = aiSummary ?? summary
+  const displaySummary = rawSummary ? (aiSummary ? rawSummary : stripHtml(rawSummary)) : null
+  if (!rawSummary) return null
 
   return (
     <Card>

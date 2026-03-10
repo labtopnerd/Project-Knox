@@ -8,6 +8,7 @@ const nextConfig: NextConfig = {
       { protocol: 'https', hostname: 'www.congress.gov' },
       { protocol: 'https', hostname: '*.openstates.org' },
       { protocol: 'https', hostname: 'unitedstates.github.io' }, // Congress member photos
+      { protocol: 'https', hostname: 'theunitedstates.io' }, // Congress member photos
       { protocol: 'https', hostname: '*.senate.mn' }, // MN Senate photos
       { protocol: 'https', hostname: '*.house.gov' },
       { protocol: 'https', hostname: '*.senate.gov' },

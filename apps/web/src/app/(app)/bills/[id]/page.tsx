@@ -9,9 +9,11 @@ import { BookmarkButton } from '@/components/bills/BookmarkButton'
 import { ShareButtons } from '@/components/bills/ShareButtons'
 import { BillAiSummary } from '@/components/bills/BillAiSummary'
 import { BillProCon } from '@/components/bills/BillProCon'
+import { BillEnrichTrigger } from '@/components/bills/BillEnrichTrigger'
 import { BillTimeline } from '@/components/bills/BillTimeline'
 import { BipartisanMeter } from '@/components/bills/BipartisanMeter'
 import { RelatedBills } from '@/components/bills/RelatedBills'
+import { BillTextFormats } from '@/components/bills/BillTextFormats'
 import { RepCard } from '@/components/representatives/RepCard'
 import { ContactForm } from '@/components/contact/ContactForm'
 import { CollapsibleCard } from '@/components/ui/collapsible-card'
@@ -27,8 +29,24 @@ type Params = Promise<{ id: string }>
 
 export async function generateMetadata({ params }: { params: Params }) {
   const { id } = await params
-  const bill = await prisma.bill.findUnique({ where: { id }, select: { title: true } })
-  return { title: bill?.title ?? 'Bill Detail' }
+  const bill = await prisma.bill.findUnique({
+    where: { id },
+    select: { title: true, billNumber: true, status: true, aiSummary: true, summary: true },
+  })
+  if (!bill) return { title: 'Bill Detail' }
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
+  const description = (bill.aiSummary ?? bill.summary ?? `Track ${bill.billNumber ?? 'this bill'} and vote your opinion on Project Knox.`).slice(0, 200)
+  return {
+    title: bill.title,
+    description,
+    openGraph: {
+      title: bill.billNumber ? `${bill.billNumber} — ${bill.title}` : bill.title,
+      description,
+      url: `${appUrl}/bills/${id}`,
+      type: 'article' as const,
+    },
+    twitter: { card: 'summary_large_image' as const, title: bill.title, description },
+  }
 }
 
 export default async function BillDetailPage({ params }: { params: Params }) {
@@ -105,6 +123,9 @@ export default async function BillDetailPage({ params }: { params: Params }) {
   const conArguments = Array.isArray(bill.conArguments) ? (bill.conArguments as unknown as Argument[]) : []
   const timelineActions = Array.isArray(bill.actions) ? (bill.actions as unknown as TimelineAction[]) : []
   const relatedBillsList = Array.isArray(bill.relatedBills) ? (bill.relatedBills as unknown as RelatedBill[]) : []
+
+  type TextFormat = { type: string; url: string }
+  const textFormatsList = Array.isArray(bill.textFormats) ? (bill.textFormats as unknown as TextFormat[]) : []
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -184,6 +205,9 @@ export default async function BillDetailPage({ params }: { params: Params }) {
         </CardContent>
       </Card>
 
+      {/* Trigger on-demand enrichment if not yet enriched */}
+      {!bill.aiEnrichedAt && <BillEnrichTrigger billId={bill.id} />}
+
       {/* AI Summary (replaces plain Summary card) */}
       <BillAiSummary
         aiSummary={bill.aiSummary ?? null}
@@ -217,6 +241,9 @@ export default async function BillDetailPage({ params }: { params: Params }) {
           </CardContent>
         </Card>
       )}
+
+      {/* Available text formats */}
+      {textFormatsList.length > 0 && <BillTextFormats textFormats={textFormatsList} />}
 
       {/* Pro / Con */}
       <BillProCon proArguments={proArguments} conArguments={conArguments} />
@@ -325,11 +352,11 @@ export default async function BillDetailPage({ params }: { params: Params }) {
           <>
             {myReps.map((rep) => {
               const repTypeLabel =
-                rep.title ??
-                (rep.chamber === 'senate' ? 'Senator' :
-                 rep.chamber === 'house' ? 'Representative' :
-                 rep.chamber === 'state_senate' ? 'State Senator' :
-                 rep.chamber === 'state_house' ? 'State Representative' : 'Representative')
+                rep.chamber === 'senate' ? 'U.S. Senator' :
+                rep.chamber === 'house' ? 'U.S. House Representative' :
+                rep.chamber === 'state_senate' ? 'State Senator' :
+                rep.chamber === 'state_house' ? 'State House Representative' :
+                rep.title ?? 'Local Official'
               return (
                 <CollapsibleCard
                   key={rep.id}
@@ -362,7 +389,11 @@ export default async function BillDetailPage({ params }: { params: Params }) {
           </p>
         </CardHeader>
         <CardContent>
-          <ShareButtons billTitle={bill.title} billUrl={billShareUrl} />
+          <ShareButtons
+            title={bill.billNumber ? `${bill.billNumber} — ${bill.title}` : bill.title}
+            url={billShareUrl}
+            text={`I just looked up "${bill.billNumber ?? bill.title}" on Project Knox — see what your reps are voting on:`}
+          />
         </CardContent>
       </Card>
     </div>

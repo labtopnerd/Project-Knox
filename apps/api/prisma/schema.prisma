@@ -134,11 +134,15 @@ model Representative {
   termEnd        DateTime?
   rawData        Json?    // Full API response cached
   lastSyncedAt   DateTime?
+  legiscanPeopleId  Int?     // LegiScan people_id — for OpenStates-sourced reps matched to LegiScan
+  legiscanStateCode String?  // LegiScan 2-letter state code, e.g. "CA" — for state rep voting sync
   // Relations
   users          UserRepresentative[]
   sponsoredBills Bill[]   @relation("BillSponsor")
   cosponsored    BillCosponsor[]
   messages       SentMessage[]
+  repVotes       RepVote[]
+  repSessions    RepSession[]
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -200,6 +204,9 @@ model Bill {
 
   // Related legislation (Congress.gov /relatedbills endpoint)
   relatedBills   Json?     // [{title, billNumber, url, relationshipType}]
+
+  // Available text formats (Congress.gov /text endpoint)
+  textFormats    Json?     // [{type: string, url: string}] from latest text version
   // Relations
   sponsor        Representative? @relation("BillSponsor", fields: [sponsorId], references: [id])
   cosponsors     BillCosponsor[]
@@ -209,6 +216,7 @@ model Bill {
   stateAggregates BillVoteAggregateByState[]
   messages       SentMessage[]
   notifications  NotificationEvent[]
+  rollCalls      RollCall[]
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -325,4 +333,86 @@ model NotificationEvent {
 
   @@index([userId, readAt])
   @@index([userId, createdAt])
+}
+
+// =============================================================================
+// ROLL CALLS — legislative floor votes (LegiScan getRollCall)
+// =============================================================================
+
+model RollCall {
+  id          String    @id @default(cuid())
+  rollCallId  Int       @unique          // LegiScan immutable integer ID
+  billId      String
+  date        DateTime
+  description String
+  yea         Int
+  nay         Int
+  nv          Int                        // Not Voting count
+  absent      Int
+  total       Int
+  passed      Boolean
+  chamber     String                     // "house" | "senate"
+  sessionId   Int?                       // LegiScan session_id — populated by history sync
+  yearStart   Int?                       // Denormalized year for fast filtering
+  bill        Bill      @relation(fields: [billId], references: [id], onDelete: Cascade)
+  repVotes    RepVote[]
+  createdAt   DateTime  @default(now())
+
+  @@index([billId])
+  @@index([date])
+  @@index([sessionId])
+}
+
+model RepVote {
+  id               String         @id @default(cuid())
+  rollCallId       String
+  representativeId String
+  voteText         String         // "Yea" | "Nay" | "Not Voting" | "Absent"
+  rollCall         RollCall       @relation(fields: [rollCallId], references: [id], onDelete: Cascade)
+  representative   Representative @relation(fields: [representativeId], references: [id], onDelete: Cascade)
+  createdAt        DateTime       @default(now())
+
+  @@unique([representativeId, rollCallId])
+  @@index([representativeId])
+}
+
+// =============================================================================
+// REP SESSIONS — tracks which LegiScan sessions have been synced per rep
+// =============================================================================
+
+model RepSession {
+  id               String         @id @default(cuid())
+  representativeId String
+  sessionId        Int            // LegiScan session_id (immutable)
+  yearStart        Int            // e.g. 2023
+  yearEnd          Int            // e.g. 2024
+  sessionTitle     String         // e.g. "118th Congress"
+  syncedAt         DateTime?      // null = not yet synced
+  voteCount        Int            @default(0)
+  representative   Representative @relation(fields: [representativeId], references: [id], onDelete: Cascade)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@unique([representativeId, sessionId])
+  @@index([representativeId])
+  @@index([syncedAt])
+}
+
+// =============================================================================
+// SYNC LOGS — persistent record of backfill / cron job runs
+// =============================================================================
+
+model SyncLog {
+  id          String    @id @default(cuid())
+  job         String    // "backfill:bills" | "backfill:textFormats"
+  status      String    // "running" | "completed" | "failed"
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+  durationMs  Int?
+  result      Json?     // { synced, skipped, errors, statesProcessed, ... }
+  error       String?   @db.Text
+  createdAt   DateTime  @default(now())
+
+  @@index([job])
+  @@index([startedAt])
 }

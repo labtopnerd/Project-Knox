@@ -9,16 +9,32 @@ interface Props {
   description?: string
   children: React.ReactNode
   defaultOpen?: boolean
+  storageKey?: string
 }
 
-export function CollapsibleCard({ title, description, children, defaultOpen = false }: Props) {
-  const [open, setOpen] = useState(defaultOpen)
+export function CollapsibleCard({ title, description, children, defaultOpen = false, storageKey }: Props) {
+  const [open, setOpen] = useState(() => {
+    if (!storageKey) return defaultOpen
+    try {
+      const stored = localStorage.getItem(`collapsible:${storageKey}`)
+      if (stored !== null) return stored === 'true'
+    } catch {}
+    return defaultOpen
+  })
+
+  function toggle() {
+    const next = !open
+    setOpen(next)
+    if (storageKey) {
+      try { localStorage.setItem(`collapsible:${storageKey}`, String(next)) } catch {}
+    }
+  }
 
   return (
     <Card>
       <CardHeader
         className="cursor-pointer select-none pb-3"
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggle}
       >
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">

@@ -34,6 +34,15 @@ export const TTL = {
   BILL_DETAIL: 1800,         // 30 minutes
   BILL_AGGREGATES: 300,      // 5 minutes — frequently updated
   CENSUS_GEOCODE: 604800,    // 7 days — geocoding results are stable
+  LEGISCAN_SESSION: 86400,   // 24h — session list is stable
+  LEGISCAN_MASTER: 3600,     // 1h  — master bill list
+  LEGISCAN_BILL: 1800,       // 30m — bill detail
+  LEGISCAN_PEOPLE: 86400,    // 24h — session people list
+  LEGISCAN_ROLLCALL: 86400,  // 24h — roll calls are immutable once recorded
+  LEGISCAN_SPONSORED: 3600,  // 1h  — sponsored bill list per person
+  LEGISCAN_BIO: 86400,       // 24h — person bio and session list (stable)
+  LEGISCAN_PERSON_VOTES: 3600, // 1h — all votes for a person (filter client-side by session)
+  HISTORY_TRIGGER: 86400,    // 24h — rate gate for the /sync-history endpoint per rep
 } as const
 
 export async function cacheGet<T>(key: string): Promise<T | null> {

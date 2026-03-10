@@ -1,0 +1,9 @@
+cat > ~/.config/containers/systemd/redis.container << 'EOF'
+[Container]
+ContainerName=redis
+Image=docker.io/library/redis:alpine
+PublishPort=6379:6379
+
+[Install]
+WantedBy=default.target
+EOF
