@@ -8,6 +8,7 @@
 import { Router, type Response } from 'express'
 import { z } from 'zod'
 import { prisma } from '../lib/prisma'
+import type { Prisma } from '@prisma/client'
 import { optionalAuth, type AuthRequest } from '../middleware/auth.middleware'
 import { geocodeAddress, geocodeZipCode } from '../services/census/client'
 import { getUSSessionId, getSessionPeople, getSponsoredList } from '../services/legiscan/client'
@@ -43,7 +44,7 @@ const lookupSchema = z.object({
 representativesRouter.get('/', optionalAuth, async (req: AuthRequest, res: Response): Promise<void> => {
   const { level, stateCode, chamber, forUser } = req.query as Record<string, string>
 
-  const where: Record<string, unknown> = { isActive: true }
+  const where: Prisma.RepresentativeWhereInput = { isActive: true }
   if (level && level !== 'all') where.level = level
   if (stateCode) where.stateCode = stateCode.toUpperCase()
   if (chamber && chamber !== 'all') where.chamber = chamber
@@ -174,10 +175,10 @@ representativesRouter.post('/:id/sync-history', async (req: AuthRequest, res: Re
         yearEnd: session.yearEnd,
         sessionTitle: session.sessionTitle,
       }
-      await queue.sendOnce(
+      await queue.send(
         'sync-rep-history',
         jobData,
-        { key: `${rep.id}:${session.sessionId}`, retryLimit: 3, retryDelay: 120, expireInHours: 48 },
+        { singletonKey: `${rep.id}:${session.sessionId}`, retryLimit: 3, retryDelay: 120, expireInSeconds: 172800 },
       )
       enqueued++
     }
@@ -211,7 +212,7 @@ representativesRouter.get('/:id/votes', async (req: AuthRequest, res: Response):
     return
   }
 
-  const voteWhere = {
+  const voteWhere: Prisma.RepVoteWhereInput = {
     representativeId: req.params.id,
     ...(sessionIdParam ? { rollCall: { sessionId: sessionIdParam } } : {}),
   }
@@ -408,10 +409,11 @@ representativesRouter.post('/:id/sync', async (req: AuthRequest, res: Response):
   // Enqueue via pg-boss — deduped by repId, retries 3x on failure
   try {
     const queue = await getQueue()
-    await queue.sendOnce('sync-rep', { repId: rep.id, peopleId }, {
+    await queue.send('sync-rep', { repId: rep.id, peopleId }, {
+      singletonKey: rep.id,
       retryLimit: 3,
       retryDelay: 60,
-      expireInHours: 24,
+      expireInSeconds: 86400,
     })
     res.status(202).json({ started: true })
   } catch {

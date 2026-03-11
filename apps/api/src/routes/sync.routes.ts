@@ -102,10 +102,10 @@ syncRouter.post('/rep-history', async (req: Request, res: Response): Promise<voi
           yearEnd: session.yearEnd,
           sessionTitle: session.sessionTitle,
         }
-        await queue.sendOnce(
+        await queue.send(
           'sync-rep-history',
           jobData,
-          { key: `${rep.id}:${session.sessionId}`, retryLimit: 3, retryDelay: 120, expireInHours: 48 },
+          { singletonKey: `${rep.id}:${session.sessionId}`, retryLimit: 3, retryDelay: 120, expireInSeconds: 172800 },
         )
         enqueued++
       }

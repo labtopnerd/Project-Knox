@@ -7,7 +7,7 @@
  * DELETE /api/bills/:id/vote — remove a vote
  */
 
-import { Router, type Request, type Response } from 'express'
+import { Router, type Response } from 'express'
 import { z } from 'zod'
 import { prisma } from '../lib/prisma'
 import { requireAuth, optionalAuth, type AuthRequest } from '../middleware/auth.middleware'
@@ -42,7 +42,7 @@ billsRouter.get('/', optionalAuth, async (req: AuthRequest, res: Response): Prom
   const offset = (pageNum - 1) * limitNum
 
   // Build WHERE clause
-  const where: Record<string, unknown> = {}
+  const where: Prisma.BillWhereInput = {}
   if (level && level !== 'all') where.level = level
   if (stateCode) where.stateCode = stateCode.toUpperCase()
   if (chamber && chamber !== 'all') where.chamber = chamber
@@ -80,7 +80,7 @@ billsRouter.get('/', optionalAuth, async (req: AuthRequest, res: Response): Prom
     ])
     const repIds = userReps.map((ur) => ur.representativeId)
 
-    const orClauses: Record<string, unknown>[] = [{ level: 'federal' }]
+    const orClauses: Prisma.BillWhereInput[] = [{ level: 'federal' }]
     if (userProfile?.stateCode) {
       orClauses.push({ stateCode: userProfile.stateCode })
     }
@@ -380,7 +380,7 @@ billsRouter.get('/bookmarks/me', requireAuth, async (req: AuthRequest, res: Resp
 // ─── POST /api/bills/:id/enrich ───────────────────────────────────────────────
 // On-demand AI enrichment for a single bill. No-ops if already enriched.
 
-billsRouter.post('/:id/enrich', requireAuth, async (req: Request, res: Response): Promise<void> => {
+billsRouter.post('/:id/enrich', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
   const bill = await prisma.bill.findUnique({
     where: { id: req.params.id },
     include: { sponsor: { select: { fullName: true, party: true, stateCode: true } } },
@@ -425,7 +425,7 @@ async function updateBillAggregates(
   newVote: string | null,
 ): Promise<void> {
   // Build increment/decrement deltas
-  const delta: Record<string, number> = {
+  const delta = {
     supportCount: 0,
     opposeCount: 0,
     neutralCount: 0,
@@ -469,7 +469,7 @@ async function updateBillAggregateByState(
   oldVote: string | null,
   newVote: string | null,
 ): Promise<void> {
-  const delta: Record<string, number> = {
+  const delta = {
     supportCount: 0,
     opposeCount: 0,
     neutralCount: 0,

@@ -40,12 +40,8 @@ export async function getQueue(): Promise<PgBoss> {
 
   boss = new PgBoss({
     connectionString,
-    // Retain completed jobs for 3 days for observability
-    deleteAfterDays: 3,
-    // Archive failed jobs for 7 days
-    archiveFailedAfterDays: 7,
     // Check for new work every 2 seconds
-    monitorStateIntervalSeconds: 2,
+    monitorIntervalSeconds: 2,
   })
 
   boss.on('error', (err) => console.error('[Queue] pg-boss error:', err))

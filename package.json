@@ -11,7 +11,7 @@
     "build": "turbo run build",
     "dev": "turbo run dev --filter=!@project-knox/mobile",
     "lint": "turbo run lint",
-    "type-check": "turbo run type-check",
+    "type-check": "turbo run type-check --filter=!@project-knox/mobile",
     "db:generate": "cd apps/api && npx prisma generate",
     "db:migrate": "cd apps/api && npx prisma migrate dev",
     "db:push": "cd apps/api && npx prisma db push",

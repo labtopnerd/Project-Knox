@@ -3,10 +3,11 @@
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "dist",
+    "noUncheckedIndexedAccess": false,
     "paths": {
       "@project-knox/types": ["../../packages/types/src/index.ts"]
     }
   },
-  "include": ["src/**/*", "prisma/**/*"],
+  "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
 }

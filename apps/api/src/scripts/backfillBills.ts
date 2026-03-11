@@ -60,7 +60,7 @@ async function main() {
   try {
     // Federal — process full masterlist; unchanged bills are skipped via change_hash cache
     console.log('\n[Backfill] === Federal bills ===')
-    const federal = await syncFederalBills(119, 10000)
+    const federal = await syncFederalBills(119)
     console.log(`[Backfill] Federal: ${federal.synced} synced, ${federal.skipped} skipped, ${federal.errors} errors`)
 
     // State — historical window

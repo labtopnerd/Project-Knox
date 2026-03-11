@@ -147,19 +147,23 @@ async function startWorkers() {
     const queue = await getQueue()
 
     // sync-rep: fetch and store all sponsored bills + roll calls for one rep
-    queue.work<SyncRepJobData>('sync-rep', { teamSize: 2 }, async (job) => {
-      const { repId, peopleId } = job.data
-      console.log(`[Worker] sync-rep: starting for rep ${repId}`)
-      await syncRepInBackground(repId, peopleId)
-      console.log(`[Worker] sync-rep: done for rep ${repId}`)
+    queue.work<SyncRepJobData>('sync-rep', { localConcurrency: 2 }, async (jobs) => {
+      for (const job of jobs) {
+        const { repId, peopleId } = job.data
+        console.log(`[Worker] sync-rep: starting for rep ${repId}`)
+        await syncRepInBackground(repId, peopleId)
+        console.log(`[Worker] sync-rep: done for rep ${repId}`)
+      }
     })
 
-    // sync-rep-history: sync one session's votes for one rep (rate-limit friendly: teamSize 1)
-    queue.work<SyncRepHistoryJobData>('sync-rep-history', { teamSize: 1 }, async (job) => {
-      const { repId, peopleId, sessionId, yearStart, yearEnd, sessionTitle } = job.data
-      console.log(`[Worker] sync-rep-history: rep ${repId} session ${sessionId} (${sessionTitle})`)
-      await syncRepHistoryForSession(repId, peopleId, sessionId, yearStart, yearEnd, sessionTitle)
-      console.log(`[Worker] sync-rep-history: done rep ${repId} session ${sessionId}`)
+    // sync-rep-history: sync one session's votes for one rep (rate-limit friendly)
+    queue.work<SyncRepHistoryJobData>('sync-rep-history', { localConcurrency: 1 }, async (jobs) => {
+      for (const job of jobs) {
+        const { repId, peopleId, sessionId, yearStart, yearEnd, sessionTitle } = job.data
+        console.log(`[Worker] sync-rep-history: rep ${repId} session ${sessionId} (${sessionTitle})`)
+        await syncRepHistoryForSession(repId, peopleId, sessionId, yearStart, yearEnd, sessionTitle)
+        console.log(`[Worker] sync-rep-history: done rep ${repId} session ${sessionId}`)
+      }
     })
 
     console.log('[Queue] Workers registered: sync-rep, sync-rep-history')
