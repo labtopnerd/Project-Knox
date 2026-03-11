@@ -80,7 +80,6 @@ export default async function OgImage({ params }: { params: Promise<{ id: string
           <div style={{ display: 'flex', alignItems: 'center', gap: 40 }}>
             {/* Avatar */}
             {photoSrc ? (
-              // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={photoSrc}
                 alt={rep.fullName}

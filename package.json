@@ -21,6 +21,9 @@
   "devDependencies": {
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
+    "@typescript-eslint/eslint-plugin": "^8.57.0",
+    "@typescript-eslint/parser": "^8.57.0",
+    "eslint": "^10.0.3",
     "turbo": "^2.3.3",
     "typescript": "^5.7.2"
   },
