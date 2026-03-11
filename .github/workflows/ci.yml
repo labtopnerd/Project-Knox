@@ -34,6 +34,11 @@ jobs:
         run: npm run lint
 
       - name: Validate Prisma schema
+        # DIRECT_URL is required by the schema; skip validation on forks/PRs without secrets
+        if: ${{ env.DATABASE_URL != '' }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
         run: cd apps/api && npx prisma validate
 
       - name: Check for Prisma schema drift
